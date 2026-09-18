@@ -33,7 +33,7 @@ final class AuthorPreviewProxy {
             return empty(400);
         }
         try {
-            int access = http.get().uri(URI.create(oauth.platformUpstream() + "/api/v1/author/previews/access"))
+            int access = http.get().uri(URI.create(oauth.domainApiUpstream() + "/api/v1/author/previews/access"))
                     .headers(headers -> headers.setBearerAuth(token))
                     .exchange((sent, received) -> received.getStatusCode().value());
             if (access != 204) return empty(access == 401 || access == 403 ? access : 503);

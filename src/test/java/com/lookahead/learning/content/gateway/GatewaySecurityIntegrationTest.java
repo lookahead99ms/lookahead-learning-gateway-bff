@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         properties = {"spring.config.name=security-test", "app.deployment-environment=local",
                 "app.oauth.issuer=http://127.0.0.1:4331", "app.oauth.frontend=http://127.0.0.1:4331",
                 "app.oauth.client-secret=synthetic-long-client-secret-for-testing", "app.oauth.client-id=lookahead-test-gateway",
-                "app.oauth.identity-upstream=http://identity:8080", "app.oauth.platform-upstream=http://platform:8080"})
+                "app.oauth.identity-upstream=http://identity:8080", "app.oauth.domain-api-upstream=http://domain-api:8080"})
 @ActiveProfiles("gateway")
 class GatewaySecurityIntegrationTest {
     @LocalServerPort int port;

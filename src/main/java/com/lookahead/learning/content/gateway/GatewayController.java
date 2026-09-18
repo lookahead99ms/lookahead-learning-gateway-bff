@@ -71,7 +71,7 @@ public class GatewayController {
         int bodyLimit = execution ? 512 * 1024 : 8 * 1024 * 1024;
         byte[] body=request.getInputStream().readNBytes(bodyLimit + 1);
         if(body.length>bodyLimit)return ResponseEntity.status(413).build();
-        String target=settings.platformUpstream()+upstreamPath+(request.getQueryString()==null?"":"?"+request.getQueryString());
+        String target=settings.domainApiUpstream()+upstreamPath+(request.getQueryString()==null?"":"?"+request.getQueryString());
         var outgoing=http.method(HttpMethod.valueOf(request.getMethod())).uri(java.net.URI.create(target)).headers(headers->{
             for(String name:List.of("Content-Type","Accept","Idempotency-Key","If-Match","X-LookAhead-Account")) {
                 String value=request.getHeader(name);if(value!=null)headers.set(name,value);

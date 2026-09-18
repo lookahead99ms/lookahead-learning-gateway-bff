@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         properties = {"spring.config.name=identity-proxy-servlet-test", "app.deployment-environment=local",
                 "app.oauth.issuer=http://localhost:19001", "app.oauth.frontend=http://localhost:19001",
                 "app.oauth.client-secret=synthetic-client-secret-for-servlet-test",
-                "app.oauth.client-id=lookahead-servlet-test", "app.oauth.platform-upstream=http://platform:8080",
+                "app.oauth.client-id=lookahead-servlet-test", "app.oauth.domain-api-upstream=http://domain-api:8080",
                 "app.gateway.identity-cookie-name=LOOKAHEAD_TEST_IDENTITY"})
 @ActiveProfiles("gateway")
 class IdentityProxyServletIntegrationTest {

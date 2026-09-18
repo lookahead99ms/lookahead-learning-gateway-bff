@@ -7,7 +7,7 @@ import java.time.Duration;
 /** Gateway credentials and fixed service origins; no signing key or database settings. */
 @ConfigurationProperties("app.oauth")
 public record OAuthProperties(String issuer, String frontend, String clientSecret, String clientId,
-        String identityUpstream, String platformUpstream,
+        String identityUpstream, String domainApiUpstream,
         @DefaultValue("3s") Duration connectTimeout, @DefaultValue("7s") Duration readTimeout) {
     public OAuthProperties {
         bounded(connectTimeout, Duration.ofSeconds(10));

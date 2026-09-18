@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 class AuthorPreviewSettingsTest {
     static final String SOURCE_SECRET = "synthetic-preview-source-key-0123456789";
     static final OAuthSettings OAUTH = new OAuthSettings("http://127.0.0.1:4301", "lookahead-web-gateway-dev",
-            "synthetic-oauth-client-secret-0123456789", "http://identity:8080", "http://platform:8080", "http://127.0.0.1:4301");
+            "synthetic-oauth-client-secret-0123456789", "http://identity:8080", "http://domain-api:8080", "http://127.0.0.1:4301");
 
     @Test void acceptsOnlyTheNativeOrContainerLocalSourceAndRedactsItsKey() {
         for (String origin : new String[]{"http://127.0.0.1:4315", "http://host.docker.internal:4315/"}) {
@@ -34,7 +34,7 @@ class AuthorPreviewSettingsTest {
             assertThatIllegalStateException().isThrownBy(() -> AuthorPreviewSettings.from(environment, OAUTH));
         }
         var external = new OAuthSettings("https://preview.example.test", OAUTH.clientId(), OAUTH.clientSecret(),
-                OAUTH.identityUpstream(), OAUTH.platformUpstream(), "https://preview.example.test");
+                OAUTH.identityUpstream(), OAUTH.domainApiUpstream(), "https://preview.example.test");
         assertThatIllegalStateException().isThrownBy(() -> AuthorPreviewSettings.from(environment(), external));
     }
 

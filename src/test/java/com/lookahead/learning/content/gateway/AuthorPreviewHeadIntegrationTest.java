@@ -118,7 +118,7 @@ class AuthorPreviewHeadIntegrationTest {
                     new Artifact("preview-directory/manifest.json", MediaType.APPLICATION_JSON, "{\"entries\":[]}", "DENY", "'none'"))) {
                 for (HttpMethod method : new HttpMethod[]{HttpMethod.GET, HttpMethod.HEAD}) {
                     server.reset();
-                    server.expect(requestTo("http://platform:8080/api/v1/author/previews/access"))
+                    server.expect(requestTo("http://domain-api:8080/api/v1/author/previews/access"))
                             .andExpect(method(HttpMethod.GET)).andRespond(withStatus(HttpStatus.NO_CONTENT));
                     server.expect(requestTo("http://127.0.0.1:4315/" + artifact.path())).andExpect(method(method))
                             .andRespond(withSuccess(artifact.body(), artifact.type()));
@@ -152,7 +152,7 @@ class AuthorPreviewHeadIntegrationTest {
         var client = context.getBean(ClientRegistrationRepository.class).findByRegistrationId("lookahead");
         for (HttpMethod method : new HttpMethod[]{HttpMethod.GET, HttpMethod.HEAD}) {
             upstream.reset();
-            upstream.expect(requestTo("http://platform:8080/api/v1/author/previews/access"))
+            upstream.expect(requestTo("http://domain-api:8080/api/v1/author/previews/access"))
                     .andExpect(method(HttpMethod.GET)).andRespond(withStatus(HttpStatus.NO_CONTENT));
             upstream.expect(requestTo("http://127.0.0.1:4315/" + path)).andExpect(method(method))
                     .andRespond(withSuccess(body, type));
@@ -178,7 +178,7 @@ class AuthorPreviewHeadIntegrationTest {
         @Bean OAuthProperties properties() {
             var settings = AuthorPreviewSettingsTest.OAUTH;
             return new OAuthProperties(settings.issuer(), settings.frontend(), settings.clientSecret(), settings.clientId(),
-                    settings.identityUpstream(), settings.platformUpstream(), Duration.ofSeconds(3), Duration.ofSeconds(7));
+                    settings.identityUpstream(), settings.domainApiUpstream(), Duration.ofSeconds(3), Duration.ofSeconds(7));
         }
 
         @Bean RestClient.Builder previewHttpBuilder() { return RestClient.builder(); }

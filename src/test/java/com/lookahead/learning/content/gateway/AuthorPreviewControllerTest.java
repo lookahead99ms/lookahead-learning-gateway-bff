@@ -41,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class AuthorPreviewControllerTest {
     private static final String PATH = AuthorPreviewPath.PREFIX + "focus-studio/index.html";
-    private static final String ACCESS = "http://platform:8080/api/v1/author/previews/access";
+    private static final String ACCESS = "http://domain-api:8080/api/v1/author/previews/access";
     private static final String SOURCE = "http://127.0.0.1:4315/focus-studio/index.html";
 
     @Test void rejectsNullWrongAndUnauthenticatedPrincipalsWithoutCallingTheManager() {

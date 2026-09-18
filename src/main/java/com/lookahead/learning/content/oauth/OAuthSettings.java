@@ -6,12 +6,12 @@ import org.springframework.core.env.Environment;
 
 /** Only deployment configuration selects service destinations. */
 public record OAuthSettings(String issuer, String clientId, String clientSecret,
-        String identityUpstream, String platformUpstream, String frontend) {
+        String identityUpstream, String domainApiUpstream, String frontend) {
     public static OAuthSettings from(Environment environment) {
         var properties = org.springframework.boot.context.properties.bind.Binder.get(environment)
                 .bind("app.oauth", OAuthProperties.class).orElseThrow(() -> new IllegalStateException("app.oauth is required"));
-        if (environment.acceptsProfiles(org.springframework.core.env.Profiles.of("accounts", "oauth-server", "resource", "platform")))
-            throw new IllegalStateException("Gateway cannot activate Identity or Platform roles");
+        if (environment.acceptsProfiles(org.springframework.core.env.Profiles.of("accounts", "oauth-server", "resource", "domain-api", LegacyServiceNames.DOMAIN_API)))
+            throw new IllegalStateException("Gateway cannot activate Identity or Learning Domain API roles");
         String mode = environment.getProperty("app.deployment-environment", "");
         if (!Set.of("local", "dev", "prod").contains(mode))
             throw new IllegalStateException("Explicit local, dev or prod deployment environment required");
@@ -37,9 +37,9 @@ public record OAuthSettings(String issuer, String clientId, String clientSecret,
         origin(issuer, local, false); origin(frontend, local, false);
         if (!issuer.equals(frontend)) throw new IllegalStateException("Frontend and issuer must share the public origin");
         String identity = required(properties.identityUpstream());
-        String platform = required(properties.platformUpstream());
-        origin(identity, local, true); origin(platform, local, true);
-        return new OAuthSettings(issuer, client, secret, identity, platform, frontend);
+        String domainApi = required(properties.domainApiUpstream());
+        origin(identity, local, true); origin(domainApi, local, true);
+        return new OAuthSettings(issuer, client, secret, identity, domainApi, frontend);
     }
     private static String required(String value) {
         if (value == null || value.isBlank()) throw new IllegalStateException("All gateway OAuth endpoints and credentials are required");
@@ -47,7 +47,7 @@ public record OAuthSettings(String issuer, String clientId, String clientSecret,
     }
     private static void origin(String value, boolean local, boolean service) {
         URI uri = URI.create(value);
-        boolean localHost = Set.of("127.0.0.1", "localhost", "identity", "platform").contains(uri.getHost() == null ? "" : uri.getHost());
+        boolean localHost = Set.of("127.0.0.1", "localhost", "identity", "domain-api", LegacyServiceNames.DOMAIN_API).contains(uri.getHost() == null ? "" : uri.getHost());
         boolean allowedHttp = local && localHost && (service || Set.of("127.0.0.1", "localhost").contains(uri.getHost()));
         if (uri.getHost() == null || uri.getUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null
                 || !uri.getRawPath().isEmpty() || !("https".equals(uri.getScheme()) || allowedHttp && "http".equals(uri.getScheme())))
