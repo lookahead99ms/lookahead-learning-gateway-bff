@@ -1,0 +1,6 @@
+# Only explicit local mode may use HTTP and a non-secure loopback session cookie.
+server:
+  servlet:
+    session:
+      cookie:
+        secure: false

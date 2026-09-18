@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: lookahead-gateway
+  config:
+    import: optional:configtree:${LOOKAHEAD_SECRETS_DIRECTORY:/run/secrets/}
+server:
+  address: ${LOOKAHEAD_BIND_ADDRESS:127.0.0.1}
+  port: ${PORT:8080}
+  shutdown: graceful
+  forward-headers-strategy: none
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        name: ${LOOKAHEAD_GATEWAY_COOKIE_NAME:LOOKAHEAD_GATEWAY}
+        http-only: true
+        same-site: lax
+        secure: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+app:
+  deployment-environment: ${LOOKAHEAD_ENVIRONMENT}
+  oauth:
+    issuer: ${LOOKAHEAD_OAUTH_ISSUER}
+    frontend: ${LOOKAHEAD_FRONTEND_ORIGIN}
+    client-id: ${APP_OAUTH_CLIENT_ID:lookahead-web-gateway}
+    client-secret: ${LOOKAHEAD_GATEWAY_CLIENT_SECRET}
+    identity-upstream: ${LOOKAHEAD_IDENTITY_UPSTREAM}
+    platform-upstream: ${LOOKAHEAD_PLATFORM_UPSTREAM}
+  gateway:
+    identity-cookie-name: ${LOOKAHEAD_IDENTITY_COOKIE_NAME:LOOKAHEAD_SESSION}
+  author-previews:
+    enabled: ${APP_AUTHOR_PREVIEWS_ENABLED:false}
+    upstream: ${APP_AUTHOR_PREVIEWS_UPSTREAM:}
