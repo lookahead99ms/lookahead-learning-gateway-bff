@@ -19,7 +19,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class AuthorPreviewProxyTest {
-    private static final String ACCESS = "http://platform:8080/api/v1/author/previews/access";
+    private static final String ACCESS = "http://domain-api:8080/api/v1/author/previews/access";
     private static final String PATH = AuthorPreviewPath.PREFIX + "preview-directory/manifest.json";
     private static final String SOURCE = "http://127.0.0.1:4315/preview-directory/manifest.json";
     private static final String TOKEN = "synthetic-server-held-access-token";

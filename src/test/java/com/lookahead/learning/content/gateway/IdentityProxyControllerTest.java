@@ -13,7 +13,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class IdentityProxyControllerTest {
     private final OAuthSettings settings = new OAuthSettings("http://127.0.0.1:4350", "lookahead-candidate",
-            "synthetic-client-secret-for-this-test-only", "http://identity:8080", "http://platform:8080",
+            "synthetic-client-secret-for-this-test-only", "http://identity:8080", "http://domain-api:8080",
             "http://127.0.0.1:4350");
     private final RestClient.Builder http = RestClient.builder();
     private final MockRestServiceServer upstream = MockRestServiceServer.bindTo(http).build();

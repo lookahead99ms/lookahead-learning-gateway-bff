@@ -106,6 +106,6 @@ class AuthorPreviewConfigurationTest {
     private static OAuthProperties oauthProperties() {
         var settings = AuthorPreviewSettingsTest.OAUTH;
         return new OAuthProperties(settings.issuer(), settings.frontend(), settings.clientSecret(), settings.clientId(),
-                settings.identityUpstream(), settings.platformUpstream(), Duration.ofSeconds(3), Duration.ofSeconds(7));
+                settings.identityUpstream(), settings.domainApiUpstream(), Duration.ofSeconds(3), Duration.ofSeconds(7));
     }
 }

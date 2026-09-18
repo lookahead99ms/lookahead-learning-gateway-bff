@@ -1,6 +1,6 @@
 spring:
   application:
-    name: lookahead-gateway
+    name: lookahead-learning-gateway-bff
   config:
     import: optional:configtree:${LOOKAHEAD_SECRETS_DIRECTORY:/run/secrets/}
 server:
@@ -34,7 +34,7 @@ app:
     client-id: ${APP_OAUTH_CLIENT_ID:lookahead-web-gateway}
     client-secret: ${LOOKAHEAD_GATEWAY_CLIENT_SECRET}
     identity-upstream: ${LOOKAHEAD_IDENTITY_UPSTREAM}
-    platform-upstream: ${LOOKAHEAD_PLATFORM_UPSTREAM}
+    domain-api-upstream: ${LOOKAHEAD_DOMAIN_UPSTREAM}
   gateway:
     identity-cookie-name: ${LOOKAHEAD_IDENTITY_COOKIE_NAME:LOOKAHEAD_SESSION}
   author-previews:

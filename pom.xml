@@ -5,9 +5,10 @@
         <groupId>com.lookahead.learning</groupId>
         <artifactId>backend-apps</artifactId>
         <version>0.0.1-SNAPSHOT</version>
-        <relativePath>../lookahead-learning-backend/pom.xml</relativePath>
+        <relativePath>../lookahead-learning-toolkit/pom.xml</relativePath>
     </parent>
     <artifactId>gateway-app</artifactId>
+    <name>Look Ahead Gateway BFF</name>
     <dependencies>
         <dependency>
             <groupId>com.lookahead.learning</groupId>
