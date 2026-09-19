@@ -1,0 +1,30 @@
+import groovy.json.JsonOutput
+
+// Resolve dependency metadata only. Never invoke build, test, bootRun or publishing.
+gradle.projectsEvaluated {
+    rootProject.tasks.register('securityResolvedDependencies') {
+        doLast {
+            def components = [:]
+            def configurationsSeen = []
+            rootProject.allprojects.each { project ->
+                def sets = [project.configurations, project.buildscript.configurations]
+                sets.eachWithIndex { configurations, index ->
+                    configurations.findAll { it.canBeResolved }.each { configuration ->
+                        def resolved = configuration.resolvedConfiguration
+                        resolved.rethrowFailure()
+                        configurationsSeen << "${project.path}:${index == 0 ? 'project' : 'buildscript'}:${configuration.name}"
+                        resolved.resolvedArtifacts.each { artifact ->
+                            def id = artifact.moduleVersion.id
+                            def key = "${id.group}:${id.name}:${id.version}"
+                            components[key] = [group: id.group, name: id.name, version: id.version]
+                        }
+                    }
+                }
+            }
+            def output = new File(System.getenv('SECURITY_DEPENDENCY_OUTPUT'))
+            output.parentFile.mkdirs()
+            output.text = JsonOutput.prettyPrint(JsonOutput.toJson([
+                components: components.values().toList(), configurations: configurationsSeen]))
+        }
+    }
+}

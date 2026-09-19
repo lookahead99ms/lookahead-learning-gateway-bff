@@ -16,6 +16,7 @@ import java.util.Set;
 public class IdentityProxyController {
     public static final String[] PATHS = {"/api/v1/auth/options", "/api/v1/auth/csrf",
             "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/continue", "/api/v1/auth/logout",
+            "/api/v1/account/profile", "/api/v1/account/password",
             "/oauth2/authorize", "/oauth2/token", "/oauth2/jwks", "/oauth2/revoke", "/oauth2/introspect",
             "/connect/logout", "/userinfo", "/.well-known/openid-configuration",
             "/.well-known/oauth-authorization-server"};
@@ -38,11 +39,15 @@ public class IdentityProxyController {
             "/userinfo", "/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"},
             method = {RequestMethod.GET, RequestMethod.POST})
     public ResponseEntity<byte[]> identity(HttpServletRequest request) throws IOException {
+        return forward(request, MAX_BYTES);
+    }
+
+    ResponseEntity<byte[]> forward(HttpServletRequest request, int maxBytes) throws IOException {
         String path = request.getRequestURI();
         String origin = request.getHeader("Origin");
         if (origin != null && !origin.equals(settings.frontend())) return empty(403);
-        byte[] body = request.getInputStream().readNBytes(MAX_BYTES + 1);
-        if (body.length > MAX_BYTES) return empty(413);
+        byte[] body = request.getInputStream().readNBytes(maxBytes + 1);
+        if (body.length > maxBytes) return empty(413);
         String target = settings.identityUpstream() + path
                 + (request.getQueryString() == null ? "" : "?" + request.getQueryString());
         return http.method(HttpMethod.valueOf(request.getMethod())).uri(java.net.URI.create(target)).headers(headers -> {
@@ -66,8 +71,8 @@ public class IdentityProxyController {
                     || "/userinfo".equals(path) && authorization.startsWith("Bearer ")))
                 headers.set(HttpHeaders.AUTHORIZATION, authorization);
         }).body(body).exchange((sent, received) -> {
-            byte[] bytes = received.getBody().readNBytes(MAX_BYTES + 1);
-            if (bytes.length > MAX_BYTES) return empty(502);
+            byte[] bytes = received.getBody().readNBytes(maxBytes + 1);
+            if (bytes.length > maxBytes) return empty(502);
             var headers = new HttpHeaders();
             headers.setCacheControl("no-store");
             headers.set("X-Content-Type-Options", "nosniff");

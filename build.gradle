@@ -31,6 +31,18 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// DLV-916: Boot 4.1.1 still manages Tomcat 11.0.24; no stable 4.1 patch
+// containing 11.0.25 was published on 2026-09-19. Remove this override when
+// upgrading to a Boot patch that manages the fixed version (docs/security-ci.md).
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == 'org.apache.tomcat.embed') {
+            useVersion '11.0.25'
+            because 'DLV-916: patched embedded Tomcat pending the next compatible Boot release'
+        }
+    }
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 21
