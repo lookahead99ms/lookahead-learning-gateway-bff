@@ -1,10 +1,12 @@
-# Java/Maven build output; keep the Maven Wrapper distributable.
+# Java build output; keep the Gradle Wrapper distributable.
+build/
+.gradle/
 target/
 *.class
 *.jar
 *.war
 *.ear
-!.mvn/wrapper/maven-wrapper.jar
+!gradle/wrapper/gradle-wrapper.jar
 
 # Editors and operating-system metadata.
 .idea/
