@@ -1,0 +1,29 @@
+# Allow only the standalone build inputs into Docker's context.
+**
+!Dockerfile
+!.dockerignore
+!gradlew
+!build.gradle
+!settings.gradle
+!gradle/
+!gradle/wrapper/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+!src/
+!src/**
+!tools/
+!tools/container/
+!tools/container/Healthcheck.java
+
+# Do not admit accidental credentials or generated/private files under src/.
+**/.env*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/secrets/**
+**/private/**
+**/*.private.*
+**/.DS_Store
