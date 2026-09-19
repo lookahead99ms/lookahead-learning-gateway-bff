@@ -41,11 +41,13 @@ class IdentityProxyServletIntegrationTest {
     private static final HttpServer IDENTITY = identityServer();
     private final HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     @LocalServerPort int port;
+    @org.springframework.beans.factory.annotation.Autowired
+    org.springframework.web.context.WebApplicationContext context;
 
     @Configuration
     @EnableAutoConfiguration
     @Import({GatewayConfiguration.class, GatewayClientConfiguration.class, OAuthPropertiesConfiguration.class,
-            IdentityProxyController.class, GatewayErrorHandler.class})
+            IdentityProxyController.class, AccountProxyController.class, GatewayErrorHandler.class})
     static class Application { }
 
     @DynamicPropertySource static void upstream(DynamicPropertyRegistry properties) {
@@ -110,6 +112,55 @@ class IdentityProxyServletIntegrationTest {
         assertThat(RECEIVED).isEmpty();
     }
 
+    @Test void passwordSuccessClearsExistingBffSessionThroughSecurityChainAndErrorsPreserveIt() throws Exception {
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+                .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+        var session = new org.springframework.mock.web.MockHttpSession(context.getServletContext());
+        session.setAttribute("existingBffState", "preserve-until-identity-success");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/account/password")
+                        .session(session).contentType("application/json").content("{}")
+                        .cookie(new jakarta.servlet.http.Cookie("LOOKAHEAD_TEST_IDENTITY", "identity-session")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        assertThat(session.isInvalid()).isFalse();
+        assertThat(session.getAttribute("existingBffState")).isEqualTo("preserve-until-identity-success");
+        RECEIVED.remove();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/account/password")
+                        .session(session).contentType("application/json").content("{}")
+                        .cookie(new jakarta.servlet.http.Cookie("LOOKAHEAD_TEST_IDENTITY", "identity-session"))
+                        .header("X-CSRF-TOKEN", "identity-csrf"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control", "no-store"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Set-Cookie",
+                        org.hamcrest.Matchers.containsString("LOOKAHEAD_GATEWAY=;")));
+        assertThat(session.isInvalid()).isTrue();
+        RECEIVED.remove();
+    }
+
+    @Test void accountRoutesHaveExactMethodsAndForwardIdentitySessionOnly() throws Exception {
+        for (String method : new String[]{"GET", "POST"}) {
+            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/account/profile"))
+                    .header("Cookie", "LOOKAHEAD_GATEWAY=gateway; LOOKAHEAD_TEST_IDENTITY=identity-session")
+                    .header("X-CSRF-TOKEN", "identity-csrf")
+                    .header("Authorization", "Bearer not-forwarded")
+                    .method(method, HttpRequest.BodyPublishers.ofString("{}"));
+            assertThat(browser.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+            var received = RECEIVED.remove();
+            assertThat(received.path()).isEqualTo("/api/v1/account/profile");
+            assertThat(received.cookie()).isEqualTo("LOOKAHEAD_TEST_IDENTITY=identity-session");
+            assertThat(received.csrf()).isEqualTo("identity-csrf");
+            assertThat(received.authorization()).isNull();
+        }
+        // Rejected MVC methods can traverse the protected error dispatch; none may reach Identity.
+        assertThat(get("/api/v1/account/password").statusCode()).isIn(401, 403, 405);
+        for (String method : new String[]{"PUT", "DELETE", "PATCH", "HEAD"}) {
+            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/account/profile"))
+                    .method(method, HttpRequest.BodyPublishers.noBody()).build();
+            assertThat(browser.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isIn(401, 403, 405);
+        }
+        assertThat(get("/api/v1/account/other-user/profile").statusCode()).isEqualTo(401);
+        assertThat(RECEIVED).isEmpty();
+    }
+
     private HttpResponse<String> post(String path, String body, Map<String, String> headers) throws Exception {
         var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Content-Type", "application/x-www-form-urlencoded");
@@ -132,7 +183,9 @@ class IdentityProxyServletIntegrationTest {
                 String authorization = exchange.getRequestHeaders().getFirst("Authorization");
                 RECEIVED.add(new UpstreamRequest(path, body, cookie, csrf, authorization));
                 int status = 200;
-                if (path.equals("/api/v1/auth/login")) {
+                if (path.equals("/api/v1/account/profile") || path.equals("/api/v1/account/password")) {
+                    if (!"identity-csrf".equals(csrf) || !"LOOKAHEAD_TEST_IDENTITY=identity-session".equals(cookie)) status = 403;
+                } else if (path.equals("/api/v1/auth/login")) {
                     if (!"identity-csrf".equals(csrf) || !"LOOKAHEAD_TEST_IDENTITY=identity-session".equals(cookie)) status = 403;
                     else if (!LOGIN_FORM.equals(body)) status = 401;
                 } else if (body.isEmpty() || !CLIENT_AUTH.equals(authorization)) status = 400;

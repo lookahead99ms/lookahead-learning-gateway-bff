@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClientException;
 import java.util.Map;
 
-@RestControllerAdvice(assignableTypes={GatewayController.class, IdentityProxyController.class})
+@RestControllerAdvice(assignableTypes={GatewayController.class, IdentityProxyController.class, AccountProxyController.class})
 @Profile("gateway")
 @Order(-100)
 public class GatewayErrorHandler {

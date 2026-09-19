@@ -68,7 +68,24 @@ public class GatewayConfiguration {
         return http.build();
     }
     public static String safeReturn(String value) {
-        return value!=null && value.matches("^/(?:study-plan|learn|grow|look-ahead|search|support|author)(?:[/?].*)?$")
-                && !value.contains("\\") && !value.contains("\r") && !value.contains("\n") ? value : "/study-plan";
+        if (value == null || !value.startsWith("/") || unsafeRedirectCharacters(value)) return "/";
+        try {
+            var destination = new java.net.URI(value);
+            String path = destination.getPath();
+            if (destination.isAbsolute() || destination.getRawAuthority() != null || path == null
+                    || path.matches(".*(?:^|/)\\.{1,2}(?:/.*|$)")
+                    || unsafeRedirectCharacters(path) || unsafeRedirectCharacters(destination.getQuery())
+                    || unsafeRedirectCharacters(destination.getFragment())) return "/";
+            return path.equals("/") || path.equals("/account")
+                    || path.matches("^/(?:study-plan|learn|grow|look-ahead|search|support|author)(?:/.*)?$")
+                    ? value : "/";
+        } catch (java.net.URISyntaxException invalidDestination) {
+            return "/";
+        }
+    }
+
+    private static boolean unsafeRedirectCharacters(String value) {
+        return value != null && (value.indexOf('\\') >= 0
+                || value.codePoints().anyMatch(Character::isISOControl));
     }
 }

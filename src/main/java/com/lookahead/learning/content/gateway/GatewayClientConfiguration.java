@@ -15,7 +15,7 @@ import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
 import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
 import org.springframework.security.oauth2.jwt.*;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
@@ -48,13 +48,15 @@ public class GatewayClientConfiguration {
                 .refreshToken(configurer->configurer.accessTokenResponseClient(refresh)).build());
         return manager;
     }
-    private static SimpleClientHttpRequestFactory boundedRequests(OAuthProperties properties) {
-        var factory=new SimpleClientHttpRequestFactory() {
-            @Override protected void prepareConnection(java.net.HttpURLConnection connection, String method) throws java.io.IOException {
-                super.prepareConnection(connection, method);
-                connection.setInstanceFollowRedirects(false);
-            }
-        };factory.setConnectTimeout(properties.connectTimeout());factory.setReadTimeout(properties.readTimeout());
+    private static JdkClientHttpRequestFactory boundedRequests(OAuthProperties properties) {
+        // HttpURLConnection's streaming POST handling can discard a 401 response body.
+        // Preserve Identity's structured credential errors without following redirects.
+        var client = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(properties.connectTimeout())
+                .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
+                .build();
+        var factory = new JdkClientHttpRequestFactory(client);
+        factory.setReadTimeout(properties.readTimeout());
         return factory;
     }
     @Bean RestClient gatewayHttp(OAuthProperties properties) { return RestClient.builder().requestFactory(boundedRequests(properties)).build(); }
