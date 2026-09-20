@@ -56,6 +56,36 @@ public class AccountProxyController {
         return new ResponseEntity<>(response.getBody(), headers, response.getStatusCode());
     }
 
+    @org.springframework.web.bind.annotation.GetMapping({"/api/v1/account/sign-ins", "/api/v1/auth/sign-in-challenge"})
+    public ResponseEntity<byte[]> signIns(HttpServletRequest request) throws IOException {
+        if (!"GET".equals(request.getMethod()))
+            return ResponseEntity.status(405).header(HttpHeaders.CACHE_CONTROL, "no-store").build();
+        return forward(request);
+    }
+
+    @PostMapping({"/api/v1/account/sign-ins/revoke", "/api/v1/account/sign-ins/revoke-others",
+            "/api/v1/account/sign-ins/label", "/api/v1/auth/sign-in-challenge/replace",
+            "/api/v1/auth/sign-in-challenge/cancel"})
+    public ResponseEntity<byte[]> updateSignIns(HttpServletRequest request) throws IOException {
+        var response = forward(request);
+        if (response.getStatusCode().value() != 200 || response.getBody() == null) return response;
+        boolean reauthenticate;
+        try {
+            reauthenticate = new tools.jackson.databind.json.JsonMapper().readTree(response.getBody())
+                    .path("data").path("reauthenticationRequired").asBoolean(false);
+        } catch (RuntimeException invalidResponse) {
+            return ResponseEntity.status(503).header(HttpHeaders.CACHE_CONTROL, "no-store").build();
+        }
+        if (!reauthenticate) return response;
+        var session = request.getSession(false);
+        if (session != null) session.invalidate();
+        SecurityContextHolder.clearContext();
+        var headers = new HttpHeaders();
+        headers.putAll(response.getHeaders());
+        headers.add(HttpHeaders.SET_COOKIE, expiredGatewayCookie);
+        return new ResponseEntity<>(response.getBody(), headers, response.getStatusCode());
+    }
+
     private ResponseEntity<byte[]> forward(HttpServletRequest request) throws IOException {
         var response = identity.forward(request, MAX_ACCOUNT_BYTES);
         // Infrastructure errors may contain implementation details. Identity's 4xx contract is retained.

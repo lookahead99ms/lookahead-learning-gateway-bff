@@ -42,12 +42,62 @@ class GatewaySecurityIntegrationTest {
     @Autowired WebApplicationContext context;
     @Autowired ObjectMapper mapper;
     @Autowired MutationProbe mutationProbe;
+    @Autowired ActiveSignInTestConfiguration activeSignIns;
+    @org.junit.jupiter.api.BeforeEach void activeByDefault() { activeSignIns.status.set(200); }
+
+    @Test void loadedOldSessionCannotRetrieveCsrfAfterUpstreamRevocation() throws Exception {
+        var http = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        var registration = context.getBean(ClientRegistrationRepository.class).findByRegistrationId("lookahead");
+        var session = new MockHttpSession(context.getServletContext());
+        http.perform(get("/bff/api/v1/auth/csrf").session(session)
+                .with(oauth2Login().clientRegistration(registration))).andExpect(status().isOk());
+        var authentication = ((org.springframework.security.core.context.SecurityContext) session.getAttribute(
+                "SPRING_SECURITY_CONTEXT")).getAuthentication();
+        var storedRequest = new org.springframework.mock.web.MockHttpServletRequest();
+        storedRequest.setSession(session);
+        context.getBean(org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository.class)
+                .saveAuthorizedClient(new org.springframework.security.oauth2.client.OAuth2AuthorizedClient(
+                        registration, authentication.getName(), new org.springframework.security.oauth2.core.OAuth2AccessToken(
+                        org.springframework.security.oauth2.core.OAuth2AccessToken.TokenType.BEARER, "synthetic-stored-token",
+                        java.time.Instant.now(), java.time.Instant.now().plusSeconds(300))),
+                        authentication, storedRequest, new org.springframework.mock.web.MockHttpServletResponse());
+        activeSignIns.status.set(401);
+        http.perform(get("/bff/api/v1/auth/csrf").session(session))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("AUTHENTICATION_REQUIRED")));
+        assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test void loadedRevokedSessionCannotSubmitAuthorReviewWithPreviouslyValidCsrf() throws Exception {
+        var http = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        var registration = context.getBean(ClientRegistrationRepository.class).findByRegistrationId("lookahead");
+        var session = new MockHttpSession(context.getServletContext());
+        String csrf = mapper.readTree(http.perform(get("/bff/api/v1/auth/csrf").session(session)
+                .with(oauth2Login().clientRegistration(registration))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data").path("token").asText();
+        int writesBefore = mutationProbe.acceptedWrites.get();
+        var authentication = ((org.springframework.security.core.context.SecurityContext) session.getAttribute(
+                "SPRING_SECURITY_CONTEXT")).getAuthentication();
+        var storedRequest = new org.springframework.mock.web.MockHttpServletRequest();
+        storedRequest.setSession(session);
+        context.getBean(org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository.class)
+                .saveAuthorizedClient(new org.springframework.security.oauth2.client.OAuth2AuthorizedClient(
+                        registration, authentication.getName(), new org.springframework.security.oauth2.core.OAuth2AccessToken(
+                        org.springframework.security.oauth2.core.OAuth2AccessToken.TokenType.BEARER, "synthetic-stored-token",
+                        java.time.Instant.now(), java.time.Instant.now().plusSeconds(300))),
+                        authentication, storedRequest, new org.springframework.mock.web.MockHttpServletResponse());
+        activeSignIns.status.set(401);
+        http.perform(post("/bff/api/v1/author/review-artifacts/dlv-704/events").session(session).header("X-CSRF-TOKEN", csrf))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("AUTHENTICATION_REQUIRED")));
+        assertThat(session.isInvalid()).isTrue();
+        assertThat(mutationProbe.acceptedWrites).hasValue(writesBefore);
+    }
 
     @Configuration
     @EnableAutoConfiguration(excludeName = {
             "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
             "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"})
-    @Import({GatewayConfiguration.class, GatewayClientConfiguration.class, OAuthPropertiesConfiguration.class,
+    @Import({ActiveSignInTestConfiguration.class, GatewayConfiguration.class, GatewayClientConfiguration.class, OAuthPropertiesConfiguration.class,
             GatewayController.class, MutationProbe.class})
     static class Application { }
 
@@ -57,7 +107,7 @@ class GatewaySecurityIntegrationTest {
     static class MutationProbe {
         final AtomicInteger acceptedWrites = new AtomicInteger();
 
-        @PostMapping("/bff/api/v1/plans")
+        @PostMapping({"/bff/api/v1/plans", "/bff/api/v1/author/review-artifacts/dlv-704/events"})
         String mutate(OAuth2AuthenticationToken authentication) {
             assertThat(authentication.isAuthenticated()).isTrue();
             acceptedWrites.incrementAndGet();
@@ -136,6 +186,22 @@ class GatewaySecurityIntegrationTest {
                         .header("X-CSRF-TOKEN", secondToken))
                 .andExpect(status().isOk()).andExpect(content().string("accepted"));
         assertThat(mutationProbe.acceptedWrites).hasValue(1);
+    }
+
+    @Test void authorReviewRequiresSessionAndSessionBoundCsrf() throws Exception {
+        assertThat(request("GET", "/bff/api/v1/author/review-artifacts").statusCode()).isEqualTo(401);
+        var http = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        var registration = context.getBean(ClientRegistrationRepository.class).findByRegistrationId("lookahead");
+        var session = new MockHttpSession(context.getServletContext());
+        var otherSession = new MockHttpSession(context.getServletContext());
+        String path = "/bff/api/v1/author/review-artifacts/dlv-704/events";
+        String own = mapper.readTree(http.perform(get("/bff/api/v1/auth/csrf").session(session)
+                .with(oauth2Login().clientRegistration(registration))).andReturn().getResponse().getContentAsString()).path("data").path("token").asText();
+        String other = mapper.readTree(http.perform(get("/bff/api/v1/auth/csrf").session(otherSession)
+                .with(oauth2Login().clientRegistration(registration))).andReturn().getResponse().getContentAsString()).path("data").path("token").asText();
+        http.perform(post(path).session(session).with(oauth2Login().clientRegistration(registration))).andExpect(status().isForbidden());
+        http.perform(post(path).session(session).with(oauth2Login().clientRegistration(registration)).header("X-CSRF-TOKEN", other)).andExpect(status().isForbidden());
+        http.perform(post(path).session(session).with(oauth2Login().clientRegistration(registration)).header("X-CSRF-TOKEN", own)).andExpect(status().isOk());
     }
 
     private HttpResponse<String> request(String method, String path) throws Exception {

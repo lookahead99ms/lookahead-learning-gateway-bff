@@ -171,7 +171,7 @@ class AuthorPreviewHeadIntegrationTest {
     @Configuration
     @EnableWebMvc
     @EnableWebSecurity
-    @Import({GatewayConfiguration.class, GatewayClientConfiguration.class, AuthorPreviewController.class})
+    @Import({ActiveSignInTestConfiguration.class, GatewayConfiguration.class, GatewayClientConfiguration.class, AuthorPreviewController.class})
     static class TestApplication {
         @Bean OAuthSettings settings() { return AuthorPreviewSettingsTest.OAUTH; }
 

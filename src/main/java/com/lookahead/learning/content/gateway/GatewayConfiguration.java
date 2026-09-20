@@ -41,7 +41,12 @@ public class GatewayConfiguration {
     SecurityFilterChain gatewaySecurity(HttpSecurity http, ClientRegistrationRepository clients,
                                               OAuth2AuthorizedClientRepository authorized,
                                               RestClientAuthorizationCodeTokenResponseClient exchange, OidcUserService oidcUsers,
-                                              GatewaySecurityHandlers handlers) throws Exception {
+                                              GatewaySecurityHandlers handlers,
+                                              org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager manager,
+                                              org.springframework.web.client.RestClient gatewayHttp,
+                                              com.lookahead.learning.content.oauth.OAuthSettings settings) throws Exception {
+        http.addFilterAfter(new LogicalSignInFilter(manager, gatewayHttp, settings),
+                org.springframework.security.web.context.SecurityContextHolderFilter.class);
         var resolver=new DefaultOAuth2AuthorizationRequestResolver(clients,"/oauth2/authorization");
         resolver.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce());
         http.headers(headers -> headers.frameOptions(frame -> frame.disable())

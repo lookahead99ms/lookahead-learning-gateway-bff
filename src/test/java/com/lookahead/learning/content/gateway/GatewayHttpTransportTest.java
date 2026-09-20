@@ -72,6 +72,32 @@ class GatewayHttpTransportTest {
         assertThat(redirected).hasValue(0);
     }
 
+    @Test void replacementChallengePreservesConflictAndOnlyConfiguredCookies() throws Exception {
+        upstream.createContext("/api/v1/auth/sign-in-challenge/replace", exchange -> {
+            assertThat(exchange.getRequestHeaders().getFirst("Cookie"))
+                    .isEqualTo("IDENTITY_TEST=session; LOOKAHEAD_SIGNIN_BINDING=binding; LOOKAHEAD_SIGNIN_CHALLENGE=challenge");
+            assertThat(exchange.getRequestHeaders().getFirst("X-CSRF-TOKEN")).isEqualTo("csrf");
+            assertThat(exchange.getRequestHeaders().getFirst("Authorization")).isNull();
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("Set-Cookie", "LOOKAHEAD_SIGNIN_CHALLENGE=next; HttpOnly; Path=/");
+            exchange.getResponseHeaders().add("Set-Cookie", "UNRELATED=discard");
+            byte[] bytes = "{\"code\":\"SIGN_IN_LIMIT\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(409, bytes.length);
+            try(var output = exchange.getResponseBody()) { output.write(bytes); }
+        });
+        var request = new MockHttpServletRequest("POST", "/api/v1/auth/sign-in-challenge/replace");
+        request.setCookies(new jakarta.servlet.http.Cookie("IDENTITY_TEST", "session"),
+                new jakarta.servlet.http.Cookie("LOOKAHEAD_SIGNIN_BINDING", "binding"),
+                new jakarta.servlet.http.Cookie("LOOKAHEAD_SIGNIN_CHALLENGE", "challenge"),
+                new jakarta.servlet.http.Cookie("LOOKAHEAD_GATEWAY", "never-forward"));
+        request.addHeader("X-CSRF-TOKEN", "csrf"); request.addHeader("Authorization", "Bearer never-forward");
+        request.setContent("{}".getBytes(StandardCharsets.UTF_8));
+        var response = new AccountProxyController(proxy(), new MockEnvironment()).updateSignIns(request);
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(new String(response.getBody(), StandardCharsets.UTF_8)).contains("SIGN_IN_LIMIT");
+        assertThat(response.getHeaders().get(HttpHeaders.SET_COOKIE)).containsExactly("LOOKAHEAD_SIGNIN_CHALLENGE=next; HttpOnly; Path=/");
+    }
+
     private IdentityProxyController proxy() {
         var properties = new OAuthProperties(origin, origin, "synthetic-long-client-secret-testing", "test-client", origin,
                 "http://domain-api:8080", Duration.ofSeconds(3), Duration.ofSeconds(7));
