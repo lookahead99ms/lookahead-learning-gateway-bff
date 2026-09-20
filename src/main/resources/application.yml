@@ -37,6 +37,8 @@ app:
     domain-api-upstream: ${LOOKAHEAD_DOMAIN_UPSTREAM}
   gateway:
     identity-cookie-name: ${LOOKAHEAD_IDENTITY_COOKIE_NAME:LOOKAHEAD_SESSION}
+    sign-in-binding-cookie-name: ${LOOKAHEAD_SIGNIN_BINDING_COOKIE_NAME:LOOKAHEAD_SIGNIN_BINDING}
+    sign-in-challenge-cookie-name: ${LOOKAHEAD_SIGNIN_CHALLENGE_COOKIE_NAME:LOOKAHEAD_SIGNIN_CHALLENGE}
   author-previews:
     enabled: ${APP_AUTHOR_PREVIEWS_ENABLED:false}
     upstream: ${APP_AUTHOR_PREVIEWS_UPSTREAM:}

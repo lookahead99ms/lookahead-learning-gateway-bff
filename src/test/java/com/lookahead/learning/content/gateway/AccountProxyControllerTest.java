@@ -148,6 +148,18 @@ class AccountProxyControllerTest {
         assertThat(session.isInvalid()).isFalse();
     }
 
+    @ParameterizedTest @ValueSource(booleans = {true, false})
+    void selectiveRevocationClearsOnlyWhenIdentityRequiresReauthentication(boolean reauthenticate) throws Exception {
+        var request = request("POST", "/api/v1/account/sign-ins/revoke");
+        var session = new MockHttpSession(); request.setSession(session);
+        upstream.expect(requestTo("http://identity:8080/api/v1/account/sign-ins/revoke"))
+                .andRespond(withSuccess("{\"data\":{\"reauthenticationRequired\":" + reauthenticate + "}}", MediaType.APPLICATION_JSON));
+        var response = account.updateSignIns(request);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(session.isInvalid()).isEqualTo(reauthenticate);
+        assertThat(response.getHeaders().get(HttpHeaders.SET_COOKIE) != null).isEqualTo(reauthenticate);
+    }
+
     private MockHttpServletRequest request(String method, String path) {
         var request = new MockHttpServletRequest(method, path);
         request.addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);

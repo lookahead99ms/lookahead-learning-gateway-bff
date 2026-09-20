@@ -115,3 +115,26 @@ The repository remains
 [lookahead-learning-gateway-bff](https://github.com/lookahead99ms/lookahead-learning-gateway-bff).
 The `gateway` runtime role, Java entry point, configuration names and executable
 name remain unchanged. Building a new image does not replace a running service.
+
+## Logical sign-in controls
+
+Identity owns durable sign-in admission and selective revocation. The Gateway exposes
+[seven exact account/challenge routes](docs/sign-in-api.md), retains Identity CSRF,
+and checks private BFF requests against the Identity-backed Domain account endpoint.
+Verification outages fail closed; revoked sessions cannot use BFF CSRF or author
+preview access just because a local OAuth principal remains in memory.
+
+Set `LOOKAHEAD_SIGNIN_BINDING_COOKIE_NAME` and
+`LOOKAHEAD_SIGNIN_CHALLENGE_COOKIE_NAME` consistently with Identity. Defaults are
+`LOOKAHEAD_SIGNIN_BINDING` and `LOOKAHEAD_SIGNIN_CHALLENGE`. All three Identity cookie
+names and the Gateway cookie name must differ; use deployment-specific names for
+side-by-side LOCAL environments. These cookies remain server controlled and never
+expose OAuth tokens to the frontend. No Google provider is activated by this work.
+## Author preview review decisions
+
+The authenticated BFF exposes three narrowly allowed Domain review routes for
+listing governed artifacts, reading their event history and recording a decision.
+See [Author review proxy](docs/author-review-api.md) for paths, request fields,
+CSRF, idempotency and proxy limits. Domain independently requires the author
+capability and records append-only review history. Recording a decision does not
+edit delivery tickets, Git or GitHub. No new BFF configuration is required.

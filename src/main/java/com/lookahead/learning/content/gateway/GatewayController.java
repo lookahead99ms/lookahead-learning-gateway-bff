@@ -67,8 +67,11 @@ public class GatewayController {
         boolean account=upstreamPath.equals("/api/v1/auth/me") || upstreamPath.equals("/api/v1/account-catalog")
                 || upstreamPath.equals("/api/v1/support") || upstreamPath.equals("/api/v1/plans") || upstreamPath.startsWith("/api/v1/plans/");
         boolean execution = executionRoute(request.getMethod(), upstreamPath) && request.getQueryString() == null;
-        if(!content && !account && !execution)return ResponseEntity.notFound().build();
-        int bodyLimit = execution ? 512 * 1024 : 8 * 1024 * 1024;
+        boolean authorReview = authorReviewRoute(request.getMethod(), upstreamPath)
+                && (!"POST".equals(request.getMethod()) || request.getQueryString() == null);
+        if(!content && !account && !execution && !authorReview)return ResponseEntity.notFound().build();
+        if (authorReview && !(authentication instanceof OAuth2AuthenticationToken)) return ResponseEntity.status(401).build();
+        int bodyLimit = authorReview ? 16 * 1024 : execution ? 512 * 1024 : 8 * 1024 * 1024;
         byte[] body=request.getInputStream().readNBytes(bodyLimit + 1);
         if(body.length>bodyLimit)return ResponseEntity.status(413).build();
         String target=settings.domainApiUpstream()+upstreamPath+(request.getQueryString()==null?"":"?"+request.getQueryString());
@@ -94,6 +97,12 @@ public class GatewayController {
             return new ResponseEntity<>(bytes,headers,received.getStatusCode());
         });
     }
+    static boolean authorReviewRoute(String method, String path) {
+        return "GET".equals(method) && "/api/v1/author/review-artifacts".equals(path)
+                || ("GET".equals(method) || "POST".equals(method))
+                && path.matches("/api/v1/author/review-artifacts/[a-z0-9][a-z0-9-]{0,79}/events");
+    }
+
     static boolean executionRoute(String method, String path) {
         return "GET".equals(method) && "/api/v1/executions/capabilities".equals(path)
                 || "POST".equals(method) && "/api/v1/executions/jobs".equals(path)

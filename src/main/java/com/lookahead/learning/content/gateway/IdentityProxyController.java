@@ -17,20 +17,39 @@ public class IdentityProxyController {
     public static final String[] PATHS = {"/api/v1/auth/options", "/api/v1/auth/csrf",
             "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/continue", "/api/v1/auth/logout",
             "/api/v1/account/profile", "/api/v1/account/password",
+            "/api/v1/account/sign-ins", "/api/v1/account/sign-ins/revoke",
+            "/api/v1/account/sign-ins/revoke-others", "/api/v1/account/sign-ins/label",
+            "/api/v1/auth/sign-in-challenge", "/api/v1/auth/sign-in-challenge/replace",
+            "/api/v1/auth/sign-in-challenge/cancel",
             "/oauth2/authorize", "/oauth2/token", "/oauth2/jwks", "/oauth2/revoke", "/oauth2/introspect",
             "/connect/logout", "/userinfo", "/.well-known/openid-configuration",
             "/.well-known/oauth-authorization-server"};
     static final int MAX_BYTES = 1024 * 1024;
     private final OAuthSettings settings;
     private final RestClient http;
-    private final String identityCookieName;
+    private final Set<String> identityCookies;
 
+    public IdentityProxyController(OAuthSettings settings, RestClient http, String identityCookieName) {
+        this(settings, http, identityCookieName, "LOOKAHEAD_SIGNIN_BINDING", "LOOKAHEAD_SIGNIN_CHALLENGE");
+    }
+
+    public IdentityProxyController(OAuthSettings settings, RestClient http, String identityCookieName,
+            String bindingCookie, String challengeCookie) {
+        this(settings, http, identityCookieName, bindingCookie, challengeCookie, "LOOKAHEAD_GATEWAY");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public IdentityProxyController(OAuthSettings settings, RestClient http,
-            @org.springframework.beans.factory.annotation.Value("${app.gateway.identity-cookie-name:LOOKAHEAD_SESSION}") String identityCookieName) {
+            @org.springframework.beans.factory.annotation.Value("${app.gateway.identity-cookie-name:LOOKAHEAD_SESSION}") String identityCookieName,
+            @org.springframework.beans.factory.annotation.Value("${app.gateway.sign-in-binding-cookie-name:LOOKAHEAD_SIGNIN_BINDING}") String bindingCookie,
+            @org.springframework.beans.factory.annotation.Value("${app.gateway.sign-in-challenge-cookie-name:LOOKAHEAD_SIGNIN_CHALLENGE}") String challengeCookie,
+            @org.springframework.beans.factory.annotation.Value("${server.servlet.session.cookie.name:LOOKAHEAD_GATEWAY}") String gatewayCookie) {
         this.settings = settings;
         this.http = http;
-        if (!identityCookieName.matches("[A-Z][A-Z0-9_]{2,63}")) throw new IllegalStateException("Invalid Identity cookie name");
-        this.identityCookieName = identityCookieName;
+        for (String name : List.of(identityCookieName, bindingCookie, challengeCookie))
+            if (!name.matches("[A-Z][A-Z0-9_]{2,63}")) throw new IllegalStateException("Invalid Identity cookie name");
+        this.identityCookies = Set.of(identityCookieName, bindingCookie, challengeCookie);
+        if (identityCookies.contains(gatewayCookie)) throw new IllegalStateException("Identity and Gateway cookies must be distinct");
     }
 
     @RequestMapping(value = {"/api/v1/auth/options", "/api/v1/auth/csrf", "/api/v1/auth/login",
@@ -58,12 +77,12 @@ public class IdentityProxyController {
             if (origin != null) headers.setOrigin(origin);
             // Never forward the Gateway session or arbitrary browser cookies to Identity.
             if (request.getCookies() != null) {
+                var selected = new java.util.LinkedHashMap<String, String>();
                 for (var cookie : request.getCookies()) {
-                    if (identityCookieName.equals(cookie.getName())) {
-                        headers.set(HttpHeaders.COOKIE, cookie.getName() + "=" + cookie.getValue());
-                        break;
-                    }
+                    if (identityCookies.contains(cookie.getName()))
+                        selected.putIfAbsent(cookie.getName(), cookie.getName() + "=" + cookie.getValue());
                 }
+                if (!selected.isEmpty()) headers.set(HttpHeaders.COOKIE, String.join("; ", selected.values()));
             }
             String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
             boolean clientEndpoint = Set.of("/oauth2/token", "/oauth2/revoke", "/oauth2/introspect").contains(path);
@@ -81,7 +100,7 @@ public class IdentityProxyController {
                 if (value != null) headers.set(name, value);
             }
             for (String cookie : received.getHeaders().getOrEmpty(HttpHeaders.SET_COOKIE)) {
-                if (cookie.startsWith(identityCookieName + "=")) headers.add(HttpHeaders.SET_COOKIE, cookie);
+                if (identityCookies.stream().anyMatch(name -> cookie.startsWith(name + "="))) headers.add(HttpHeaders.SET_COOKIE, cookie);
             }
             return new ResponseEntity<>(bytes, headers, received.getStatusCode());
         });
