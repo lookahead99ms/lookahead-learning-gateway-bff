@@ -4,7 +4,7 @@
     {
       "ruleId": "java/spring-disabled-csrf-protection",
       "file": "src/main/java/com/lookahead/learning/content/gateway/GatewayConfiguration.java",
-      "sourceSha256": "df4759d6d8f682f1d35ec2d7f5e6b158428b7f93fda1a69b417a82e2f48df623",
+      "sourceSha256": "fa93624565b64f6f57caaefc429b4e2c731d4ca3e221a8127ae93507a83951db",
       "expiresAt": "2026-10-19",
       "ticket": "DLV-804",
       "rationale": "This narrow pass-through chain does not authenticate or mutate state itself; it forwards the browser session and CSRF token to Identity, which validates both. The gateway's own authenticated BFF chain retains CSRF protection."
