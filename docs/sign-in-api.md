@@ -20,4 +20,9 @@ Every authenticated private BFF API request (including CSRF retrieval) and autho
 
 The Identity session, binding and challenge cookies are the only browser cookies relayed to Identity or accepted back from it. Configure all three separately from the Gateway cookie and from other deployments on the same hostname. A binding cookie is not a hardware identifier; a challenge cookie is not a full authenticated session. No cookie value or OAuth token is returned as API JSON.
 
+Gateway's `/bff/login?returnTo=` redirect allowlist includes the exact protected
+`/delivery-plan` path, with a safe query or fragment. The browser's local
+return-path check uses the same destination. Unrecognized Delivery Plan subpaths
+fall back to `/`; the page and its private data still require the Author grant.
+
 These are Gateway source notes for the private generated API reference. Identity defines the authoritative inventory/challenge response schemas and error catalogue. Full cross-service admission/concurrency verification remains a release gate owned by the parent DLV-920 work; Gateway unit/transport tests alone do not prove it.

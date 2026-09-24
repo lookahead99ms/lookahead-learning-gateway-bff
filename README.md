@@ -67,6 +67,13 @@ saved plans require real Identity and Domain API instances with their databases
 and matching environment configuration. The synthetic smoke credential is never
 suitable for a deployed environment.
 
+For a protected Author Delivery Plan visit, the browser keeps the exact
+`/delivery-plan` destination through sign-in. Gateway accepts that path (and its
+query or fragment) as an internal OAuth return destination, while rejecting
+unrecognized `/delivery-plan/...` subpaths. The destination remains protected by
+the Author capability check; this rule only preserves where a successful sign-in
+returns.
+
 ## Container and CI
 
 Build from this repository alone:
