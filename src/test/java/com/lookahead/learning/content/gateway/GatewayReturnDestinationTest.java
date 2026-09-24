@@ -13,7 +13,8 @@ class GatewayReturnDestinationTest {
     @ValueSource(strings = {"/", "/#paths", "/?source=login", "/?source=login#paths",
             "/account", "/account?source=login", "/account#password", "/account?source=login#password",
             "/study-plan", "/study-plan/saved?id=example#details", "/learn/java", "/grow#courses",
-            "/look-ahead", "/search?q=java%20spring", "/support", "/author/architecture"})
+            "/look-ahead", "/search?q=java%20spring", "/support", "/author/architecture",
+            "/delivery-plan", "/delivery-plan?view=roadmap"})
     void preservesRecognizedInternalDestinations(String destination) {
         assertThat(GatewayConfiguration.safeReturn(destination)).isEqualTo(destination);
     }
@@ -24,7 +25,7 @@ class GatewayReturnDestinationTest {
             "/\\outside.example", "/learn\\outside", "/learn\r\nLocation: outside",
             "/learn\t", "/learn\u0000", "/learn/%5coutside", "/?next=%0d%0aoutside",
             "/#%00", "/%2foutside.example", "/learn/%", "/learn bad", "/sign-in", "/login", "/oauth2/authorization/lookahead",
-            "/sign-up", "/account/other", "/account-other", "/account/",
+            "/sign-up", "/account/other", "/account-other", "/account/", "/delivery-plan/unknown",
             "/learn/../sign-in", "/author/%2e%2e/sign-in", "/learn/./java", "%2Flearn", "%2F"})
     void rejectsUnsafeOrUnrecognizedDestinations(String destination) {
         assertThat(GatewayConfiguration.safeReturn(destination)).isEqualTo("/");
