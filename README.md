@@ -20,6 +20,8 @@ Windows uses `gradlew.bat`. The executable is `build/libs/lookahead-gateway.jar`
 test reports are in `build/reports/tests/test/index.html`. The build retains Java
 parameter names used by Spring MVC. Its Spring Boot BOM and plugin stay pinned
 to the same version in `build.gradle`.
+The project and build-plugin classpaths temporarily select a patched Jackson BOM;
+see [Security CI](docs/security-ci.md) before changing those versions.
 
 The application owns `ApiResponse` and `CsrfView`. These are small JSON transport
 types, not a shared runtime JAR. Contract tests cover their serialization and
