@@ -256,3 +256,14 @@ The container readiness probe is production Java source at `src/main/java/com/lo
 Docker resolves the checksum-pinned Gradle wrapper in a source-independent layer before copying build declarations and application sources. This reuses the wrapper download when source files change; dependency versions and the `clean test bootJar` build remain unchanged.
 
 DEV/PROD client and Gateway-to-Domain secrets must contain the injected secret values. Startup rejects secret ARNs, unresolved configuration/CloudFormation references, whitespace/control characters and invalid lengths; ECS task-definition `valueFrom` resolves the ARN before application startup. Local configuration retains its existing contract.
+
+## SAST gate diagnostics
+
+`python3 tools/security/check.py sarif` requires completed CodeQL invocations,
+valid rule/result inventories and exercised, source-bound exceptions. A failure
+prints a reviewed constant reason (for example, missing invocation inventory or
+unexercised exception) while leaving untrusted error text and SARIF messages out
+of public logs. Warning/error notifications still block; this diagnostic change
+does not waive findings or weaken the security gate. Raw SARIF and source
+databases remain unpublished. Run the tooling regressions with
+`python3 -m unittest discover -s tools/security -p 'test_*.py'`.
