@@ -149,6 +149,46 @@ class CloudGatewaySecurityIntegrationTest {
         mvc.perform(post("/bff/api/v1/auth/logout").session(session).header("X-CSRF-TOKEN",token)).andExpect(status().isServiceUnavailable());
         assertThat(session.isInvalid()).isFalse();fixture.server.verify();
     }
+    @Test void requestParameterCannotReuseASignInRejectedByDomain()throws Exception {
+        for(String value:new String[]{"false","TRUE","1",""}) {
+            fixture.server.reset();
+            var session=session(true);
+            fixture.server.expect(requestTo(settings.domainApiUpstream()+"/api/v1/auth/me"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("Authorization","Bearer synthetic-access"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.UNAUTHORIZED));
+            mvc.perform(get("/bff/login").session(session).param("reauthenticate",value).param("returnTo","/study-plan"))
+                .andExpect(redirectedUrl(settings.frontend()+"/oauth2/authorization/lookahead"));
+            assertThat(session.getAttribute(CloudGatewaySessions.CHALLENGE)).isNotNull();
+            assertThat(session.getAttribute("learningReturnTo")).isEqualTo("/study-plan");
+            fixture.server.verify();
+        }
+    }
+    @Test void forcedReauthenticationStartsOAuthWithoutGrantingAccess()throws Exception {
+        var session=session(true);
+        mvc.perform(get("/bff/login").session(session).param("reauthenticate","true").param("returnTo","//attacker.test/"))
+            .andExpect(redirectedUrl(settings.frontend()+"/oauth2/authorization/lookahead"));
+        assertThat(session.getAttribute(CloudGatewaySessions.CHALLENGE)).isNotNull();
+        assertThat(session.getAttribute("learningReturnTo")).isEqualTo("/");
+        fixture.server.verify(); // No Domain call or token-reuse path was taken.
+    }
+    @Test void anonymousLoginParametersAlwaysStartOAuth()throws Exception {
+        for(String value:new String[]{"true","false","TRUE",""}) {
+            var session=new MockHttpSession(context.getServletContext());
+            mvc.perform(get("/bff/login").session(session).param("reauthenticate",value))
+                .andExpect(redirectedUrl(settings.frontend()+"/oauth2/authorization/lookahead"));
+        }
+        fixture.server.verify();
+    }
+    @Test void authenticatedSessionWithoutStoredClientCannotReuseSignIn()throws Exception {
+        var session=session(true);
+        var request=new MockHttpServletRequest();request.setSession(session);
+        var authentication=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+        clients.removeAuthorizedClient("lookahead",authentication,request,new MockHttpServletResponse());
+        mvc.perform(get("/bff/login").session(session).param("reauthenticate","false"))
+            .andExpect(redirectedUrl(settings.frontend()+"/oauth2/authorization/lookahead"));
+        assertThat(session.getAttribute(CloudGatewaySessions.CHALLENGE)).isNotNull();
+        fixture.server.verify();
+    }
     @Test void durableLogoutClearsSessionEvenWhenProviderRevocationIsUnavailable()throws Exception {
         var session=session(false);String token=csrf(session);
         upstream("logout","{\"data\":{\"signedOut\":true}}");

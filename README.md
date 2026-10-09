@@ -274,3 +274,22 @@ mandatory exception usage stay enforced. SARIF trace notifications (`none`)
 are informational alongside `note`; warnings, errors and unknown levels block.
 A rejected notification logs only its level and a bounded Java diagnostic ID,
 never its message, source snippet, locations or properties.
+
+
+The Docker builder and runtime use explicit, digest-pinned Eclipse Temurin
+Java 21 Ubuntu 24.04 (`21-jdk-noble` / `21-jre-noble`) images. This avoids the
+reported OpenSSL and bundled Go-tooling findings in the prior Ubuntu 26.04
+pins. The scanner still blocks High, Critical and Unknown severities, including
+unfixed findings, and requires complete OS/Java package coverage for built images.
+A passing base scan does not certify the built application; CI scans both bases
+and the exact final image. User 10001 and the existing health probe remain unchanged.
+
+
+The reviewed `java/user-controlled-bypass` login finding is source-bound to
+`GatewayController.java` and expires on 2026-10-19. The request's reauthenticate
+parameter can force fresh OAuth; it cannot grant access. Reusing a sign-in needs
+an authenticated server session, its stored client and successful Domain
+verification. `CloudGatewaySecurityIntegrationTest` covers missing clients,
+anonymous callers, rejected Domain verification and forced reauthentication;
+existing CSRF and restricted-session regressions remain active. Any controller
+source change or expiry requires a new review; other findings remain blocking.
