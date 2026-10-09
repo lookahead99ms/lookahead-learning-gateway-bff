@@ -48,16 +48,21 @@ class SecurityGateTests(unittest.TestCase):
             self.assertNotIn('rationale', checks.json.dumps(summary))
             self.assertNotIn('sourceSha256', checks.json.dumps(summary))
 
-    def test_retired_bypass_exception_cannot_suppress_a_reappearing_finding(self):
+    def test_login_bypass_finding_blocks_without_its_exact_review(self):
         exceptions = checks.load_sast_exceptions()
         self.assertTrue(exceptions)
-        self.assertEqual({'java/spring-disabled-csrf-protection'}, {rule for rule, file in exceptions})
+        self.assertEqual({'java/spring-disabled-csrf-protection', 'java/user-controlled-bypass'}, {rule for rule, file in exceptions})
         rule = 'java/user-controlled-bypass'
         document = {'runs': [{'tool': {'driver': {'name': 'CodeQL', 'rules': [
             {'id': rule, 'properties': {'security-severity': '7.8'}}]}},
             'invocations': [{'executionSuccessful': True}], 'results': [
                 {'ruleId': rule, 'locations': [{'physicalLocation': {
                     'artifactLocation': {'uri': 'src/main/java/com/lookahead/learning/content/gateway/GatewayController.java'}}}]}]}]}
+        findings = []
+        self.assertEqual(0, checks.sarif_gate([document], findings, exceptions))
+        self.assertEqual('reviewed-exception', findings[0]['disposition'])
+        self.assertEqual('DLV-918', findings[0]['ticket'])
+        exceptions.pop((rule, 'src/main/java/com/lookahead/learning/content/gateway/GatewayController.java'))
         findings = []
         self.assertEqual(1, checks.sarif_gate([document], findings, exceptions))
         self.assertEqual('requires-action', findings[0]['disposition'])

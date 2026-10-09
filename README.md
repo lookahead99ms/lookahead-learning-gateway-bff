@@ -298,9 +298,12 @@ client and successful Domain verification. `CloudGatewaySecurityIntegrationTest`
 covers missing clients, anonymous callers, rejected Domain verification and
 forced reauthentication; existing CSRF and restricted-session regressions remain
 active. Earlier October 9 PR analysis omitted the bypass finding, but main analysis
-reported it again. The bypass exception remains removed. The authentication fix
-and full-scan configuration below require new hosted proof; any unreviewed finding
-continues to block.
+reported it again. The completed full scan still reports the fresh-OAuth branch
+after the control-flow clarification. Its reviewed false-positive disposition is
+bound to the exact current file SHA and rule, expires October 19, 2026, and is
+owned by DLV-918. Request-parameter variants cannot grant access. Full-scan
+configuration below remains required; changed-source, unused, expired or
+unreviewed dispositions continue to block. New hosted proof remains required.
 
 On October 9, 2026, the pinned AMD64 candidates passed complete base/final
 package scans and the isolated three-application Local authentication contract
