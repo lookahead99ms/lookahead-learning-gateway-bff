@@ -30,13 +30,13 @@ public class GatewayClientConfiguration {
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri(settings.frontend()+"/login/oauth2/code/lookahead")
-                .scope("openid","profile","account","content","support")
-                .authorizationUri(settings.issuer()+"/oauth2/authorize")
-                .tokenUri(settings.identityUpstream()+"/oauth2/token")
-                .jwkSetUri(settings.identityUpstream()+"/oauth2/jwks")
-                .userInfoUri(settings.identityUpstream()+"/userinfo")
+                .scope(settings.cloud() ? new String[]{"openid","profile","email","aws.cognito.signin.user.admin",settings.scopePrefix()+"/account",settings.scopePrefix()+"/content",settings.scopePrefix()+"/support"} : new String[]{"openid","profile","account","content","support"})
+                .authorizationUri((settings.cloud()?settings.managedLogin():settings.issuer())+"/oauth2/authorize")
+                .tokenUri((settings.cloud()?settings.managedLogin():settings.identityUpstream())+"/oauth2/token")
+                .jwkSetUri(settings.cloud()?settings.issuer()+"/.well-known/jwks.json":settings.identityUpstream()+"/oauth2/jwks")
+                .userInfoUri(settings.cloud()?settings.managedLogin()+"/oauth2/userInfo":settings.identityUpstream()+"/userinfo")
                 .userNameAttributeName(IdTokenClaimNames.SUB).issuerUri(settings.issuer())
-                .providerConfigurationMetadata(Map.of("end_session_endpoint",settings.issuer()+"/connect/logout"))
+                .providerConfigurationMetadata(Map.of("end_session_endpoint",settings.cloud()?settings.managedLogin()+"/logout":settings.issuer()+"/connect/logout"))
                 .clientName("Look Ahead").build();
         return new InMemoryClientRegistrationRepository(client);
     }

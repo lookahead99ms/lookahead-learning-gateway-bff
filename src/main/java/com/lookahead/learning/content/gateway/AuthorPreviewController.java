@@ -40,7 +40,7 @@ class AuthorPreviewController {
                     }).build());
             if (client == null) return AuthorPreviewProxy.empty(401);
             return previews.fetch(request.getMethod(), request.getRequestURI(), request.getQueryString(),
-                    client.getAccessToken().getTokenValue());
+                    client.getAccessToken().getTokenValue(),CloudGatewaySessions.proof(request,false));
         } catch (OAuth2AuthorizationException error) {
             return AuthorPreviewProxy.empty(401);
         } catch (RestClientException error) {

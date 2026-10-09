@@ -12,7 +12,11 @@ import java.io.IOException;
 public class GatewaySecurityHandlers {
     private final OAuthSettings settings;
 
+    private org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository clients;
+    private org.springframework.web.client.RestClient http;
     public GatewaySecurityHandlers(OAuthSettings settings) { this.settings = settings; }
+    @org.springframework.beans.factory.annotation.Autowired
+    public GatewaySecurityHandlers(OAuthSettings settings,org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository clients,org.springframework.web.client.RestClient http){this.settings=settings;this.clients=clients;this.http=http;}
 
     void authenticationRequired(HttpServletRequest request, HttpServletResponse response,
                                 AuthenticationException error) throws IOException {
@@ -27,6 +31,29 @@ public class GatewaySecurityHandlers {
     void loginSucceeded(HttpServletRequest request, HttpServletResponse response,
                         Authentication authentication) throws IOException {
         var session = request.getSession();
+        if(settings.cloud()) {
+            try {
+                var client=clients.<org.springframework.security.oauth2.client.OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",authentication,request);
+                if(client==null)throw new IllegalStateException("Missing provider tokens");
+                CloudGatewaySessions.proof(request,true);
+                var admission=new CloudGatewaySessions(settings,http).call("admit",client.getAccessToken().getTokenValue(),request,java.util.Map.of());
+                if(admission.status()!=200)throw new IllegalStateException("Domain rejected admission");
+                String challenge=admission.data().path("challengeToken").asString("");
+                if(!challenge.isEmpty()) {
+                    if(!challenge.matches("[A-Za-z0-9_-]{43}"))throw new IllegalStateException("Invalid challenge");
+                    session.setAttribute(CloudGatewaySessions.CHALLENGE,challenge);
+                    Object saved=session.getAttribute("learningReturnTo");
+                    String destination=GatewayConfiguration.safeReturn(saved instanceof String value?value:null);
+                    response.sendRedirect(settings.frontend()+"/sign-in/choose?returnTo="+java.net.URLEncoder.encode(destination,java.nio.charset.StandardCharsets.UTF_8));return;
+                }
+                if(admission.data().path("signInId").asString("").isEmpty())throw new IllegalStateException("Missing admission");
+                session.removeAttribute(CloudGatewaySessions.CHALLENGE);
+            } catch(RuntimeException rejected) {
+                clients.removeAuthorizedClient("lookahead",authentication,request,response);session.invalidate();
+                org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                response.sendRedirect(settings.frontend()+"/sign-in?error=admission");return;
+            }
+        }
         Object saved = session.getAttribute("learningReturnTo");
         session.removeAttribute("learningReturnTo");
         response.sendRedirect(settings.frontend() + GatewayConfiguration.safeReturn(saved instanceof String value ? value : null));

@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** Identity authenticates these self-only operations using its own session and CSRF token. */
 @RestController
 @Profile("gateway")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnExpression("'${app.deployment-environment:local}' == 'local'")
 public class AccountProxyController {
     static final int MAX_ACCOUNT_BYTES = 8192;
     private final IdentityProxyController identity;

@@ -47,7 +47,7 @@ class IdentityProxyServletIntegrationTest {
     @Configuration
     @EnableAutoConfiguration
     @Import({GatewayConfiguration.class, GatewayClientConfiguration.class, OAuthPropertiesConfiguration.class,
-            IdentityProxyController.class, AccountProxyController.class, GatewayErrorHandler.class})
+            IdentityProxyController.class, AccountProxyController.class, CloudAccountController.class, GatewayErrorHandler.class})
     static class Application { }
 
     @DynamicPropertySource static void upstream(DynamicPropertyRegistry properties) {
@@ -55,6 +55,13 @@ class IdentityProxyServletIntegrationTest {
     }
     @BeforeEach void clearRequests() { RECEIVED.clear(); }
     @AfterAll static void stopIdentity() { IDENTITY.stop(0); }
+
+    @Test void localContextRetainsIdentityRoutesAndDoesNotCreateCloudAccountController() {
+        assertThat(context.getBeansOfType(IdentityProxyController.class)).hasSize(1);
+        assertThat(context.getBeansOfType(AccountProxyController.class)).hasSize(1);
+        assertThat(context.getBeansOfType(CloudAccountController.class)).isEmpty();
+        assertThat(context.containsBean("identityProxySecurity")).isTrue();
+    }
 
     @Test void formLoginPreservesBytesAndOnlyIdentityCookieAndCsrf() throws Exception {
         var response = post("/api/v1/auth/login", LOGIN_FORM, Map.of(

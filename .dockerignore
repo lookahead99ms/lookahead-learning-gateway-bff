@@ -11,9 +11,6 @@
 !gradle/wrapper/gradle-wrapper.properties
 !src/
 !src/**
-!tools/
-!tools/container/
-!tools/container/Healthcheck.java
 
 # Do not admit accidental credentials or generated/private files under src/.
 **/.env*

@@ -40,14 +40,33 @@ class GatewayDeploymentTest {
         assertThatIllegalStateException().isThrownBy(() -> OAuthSettings.from(prodWithLocal));
     }
     @Test void productionRequiresHttpsAndSecureDistinctCookie() {
-        assertThat(OAuthSettings.from(production()).issuer()).isEqualTo("https://learn.example.test");
+        assertThat(OAuthSettings.from(production()).issuer()).isEqualTo("https://cognito-idp.us-east-2.amazonaws.com/us-east-2_Example");
         assertThatIllegalStateException().isThrownBy(() -> OAuthSettings.from(production().withProperty("server.servlet.session.cookie.secure", "false")));
         assertThatIllegalStateException().isThrownBy(() -> OAuthSettings.from(production().withProperty("server.servlet.session.cookie.name", "LOOKAHEAD_SESSION")));
         assertThatIllegalStateException().isThrownBy(() -> OAuthSettings.from(production().withProperty("app.oauth.domain-api-upstream", "http://domain-api:8080")));
     }
+    @Test void cloudCredentialsRequireInjectedValuesInDevAndProd() {
+        for (String mode : new String[]{"dev", "prod"}) {
+            for (String property : new String[]{"app.cognito.gateway-secret", "app.oauth.client-secret"}) {
+                for (String invalid : new String[]{"arn:aws:secretsmanager:us-east-2:000000000000:secret:example",
+                        "${LOOKAHEAD_UNRESOLVED_SECRET_PLACEHOLDER}", "@application.veryLongSecretReference",
+                        "{{resolve:secretsmanager:example-secret-value}}", "x".repeat(33) + "\n",
+                        "x".repeat(33) + " ", "x".repeat(4097), "short"}) {
+                    assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> OAuthSettings.from(production()
+                            .withProperty("app.deployment-environment", mode).withProperty(property, invalid)));
+                }
+            }
+            assertThat(OAuthSettings.from(production().withProperty("app.deployment-environment", mode)).cloud()).isTrue();
+        }
+    }
     MockEnvironment production() {
         return environment().withProperty("app.deployment-environment", "prod")
                 .withProperty("app.oauth.issuer", "https://learn.example.test")
+                .withProperty("app.cognito.issuer","https://cognito-idp.us-east-2.amazonaws.com/us-east-2_Example")
+                .withProperty("app.cognito.managed-login","https://example.auth.us-east-2.amazoncognito.com")
+                .withProperty("app.cognito.scope-prefix","lookahead")
+                .withProperty("app.cognito.gateway-secret","synthetic-internal-gateway-secret-for-fixtures")
+                .withProperty("app.oauth.client-id","syntheticclient123456")
                 .withProperty("app.oauth.frontend", "https://learn.example.test")
                 .withProperty("app.oauth.identity-upstream", "https://identity.example.test")
                 .withProperty("app.oauth.domain-api-upstream", "https://domain-api.example.test");

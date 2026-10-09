@@ -24,6 +24,10 @@ final class AuthorPreviewProxy {
     }
 
     ResponseEntity<byte[]> fetch(String method, String path, String query, String token) {
+        return fetch(method,path,query,token,null);
+    }
+
+    ResponseEntity<byte[]> fetch(String method,String path,String query,String token,String proof) {
         if (token == null || token.isBlank()) return empty(401);
         if (!method.equals("GET") && !method.equals("HEAD")) return empty(405);
         final URI target;
@@ -34,7 +38,7 @@ final class AuthorPreviewProxy {
         }
         try {
             int access = http.get().uri(URI.create(oauth.domainApiUpstream() + "/api/v1/author/previews/access"))
-                    .headers(headers -> headers.setBearerAuth(token))
+                    .headers(headers -> {headers.setBearerAuth(token);if(oauth.cloud()&&proof!=null)headers.set("X-LookAhead-SignIn-Proof",proof);})
                     .exchange((sent, received) -> received.getStatusCode().value());
             if (access != 204) return empty(access == 401 || access == 403 ? access : 503);
             return http.method(HttpMethod.valueOf(method)).uri(target)

@@ -1,0 +1,148 @@
+# Task/service values are projected into maintained Infra templates. No credentials in YAML.
+schemaVersion: lookahead-service/v2
+service: gateway
+shared:
+  port: 8080
+  health:
+    path: /actuator/health/readiness
+    intervalSeconds: 15
+    enabled: true
+    command:
+    - CMD
+    - java
+    - -Xms16m
+    - -Xmx64m
+    - -cp
+    - /opt/lookahead/health
+    - com.lookahead.gateway.health.ContainerHealthcheck
+    timeoutSeconds: 5
+    retries: 3
+    startPeriodSeconds: 60
+  settings:
+    LOOKAHEAD_ENVIRONMENT: '@environment'
+    LOOKAHEAD_BIND_ADDRESS: 0.0.0.0
+    PORT: '@service.port'
+    JAVA_TOOL_OPTIONS: '@jvm'
+    APP_OAUTH_CLIENT_ID: '@application.oauthClientId'
+    LOOKAHEAD_FRONTEND_ORIGIN: '@resources.frontendOrigin'
+    LOOKAHEAD_DOMAIN_UPSTREAM: '@resources.domainEndpoint'
+    APP_AUTHOR_PREVIEWS_ENABLED: 'false'
+    LOOKAHEAD_COGNITO_ISSUER: '@application.cognitoIssuer'
+    LOOKAHEAD_COGNITO_SCOPE_PREFIX: '@application.cognitoScopePrefix'
+    LOOKAHEAD_COGNITO_MANAGED_LOGIN: '@application.cognitoManagedLogin'
+    LOOKAHEAD_DOMAIN_TRANSPORT: service-connect-tls
+  resourceRefs:
+  - domainEndpoint
+  - frontendOrigin
+  secretRefs:
+  - gatewayClient
+  - domainGateway
+  infrastructureRefs:
+    cluster: persistent.Cluster
+    subnet1: persistent.AppSubnet1
+    subnet2: persistent.AppSubnet2
+    securityGroup: persistent.GatewaySecurity
+    executionRole: persistent.SharedTaskExecutionRoleArn
+    logGroup: persistent.GatewayLogs
+    namespace: persistent.PrivateNamespaceArn
+    targetGroup: runtime.GatewayTarget
+    taskRole: persistent.SharedApplicationTaskRoleArn
+  runtime:
+    launchType: FARGATE
+    operatingSystem: LINUX
+    cpuArchitecture: X86_64
+    readOnlyRootFilesystem: true
+    assignPublicIp: false
+    platformVersion: 1.4.0
+    networkMode: awsvpc
+    ephemeralStorageGiB: 20
+    stopTimeoutSeconds: 120
+  ingress:
+    mode: load-balancer
+    targetGroupRef: runtime.GatewayTarget
+    loadBalancerRef: runtime.LoadBalancerDns
+  monitoring:
+    namespace: AWS/ECS
+    cpuAlarmRef: gateway.CpuAlarmArn
+    logs:
+      driver: awslogs
+      streamPrefix: gateway
+      region: '@region'
+      mode: non-blocking
+      maxBufferSize: 4m
+  secretEnvironment:
+    LOOKAHEAD_GATEWAY_CLIENT_SECRET: gatewayClient
+    LOOKAHEAD_DOMAIN_GATEWAY_SECRET: domainGateway
+  container:
+    name: gateway
+    user: 10001:10001
+    essential: true
+    entryPoint:
+    - java
+    - -jar
+    - /opt/lookahead/app.jar
+    workingDirectory: /opt/lookahead
+    family: lookahead-@environment-gateway
+  storage:
+    volumeName: temporary
+    mountPath: /tmp
+    readOnly: false
+  deployment:
+    minimumHealthyPercent: 100
+    maximumPercent: 200
+    healthCheckGracePeriodSeconds: 90
+    circuitBreakerEnabled: true
+    rollback: true
+environments:
+  dev:
+    cpu: 512
+    memory: 1024
+    desiredCount: 0
+    imageDigest: null
+    contentReleaseId: null
+    activationEvidence: null
+    scaling:
+      enabled: false
+      minCapacity: 0
+      maxCapacity: 2
+      targetCpuPercent: 60
+      scaleInCooldownSeconds: 300
+      scaleOutCooldownSeconds: 60
+    alarms:
+      enabled: false
+      cpuThresholdPercent: 80
+      periodSeconds: 60
+      evaluationPeriods: 3
+    jvm:
+      xmsMiB: 128
+      xmxMiB: 512
+      nativeHeadroomMiB: 256
+      args:
+      - -XX:+ExitOnOutOfMemoryError
+      - -Djava.io.tmpdir=/tmp
+  prod:
+    cpu: 512
+    memory: 1024
+    desiredCount: 0
+    imageDigest: null
+    contentReleaseId: null
+    activationEvidence: null
+    scaling:
+      enabled: false
+      minCapacity: 0
+      maxCapacity: 4
+      targetCpuPercent: 60
+      scaleInCooldownSeconds: 300
+      scaleOutCooldownSeconds: 60
+    alarms:
+      enabled: false
+      cpuThresholdPercent: 80
+      periodSeconds: 60
+      evaluationPeriods: 3
+    jvm:
+      xmsMiB: 128
+      xmxMiB: 512
+      nativeHeadroomMiB: 256
+      args:
+      - -XX:+ExitOnOutOfMemoryError
+      - -Djava.io.tmpdir=/tmp
