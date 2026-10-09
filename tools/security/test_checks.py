@@ -48,10 +48,10 @@ class SecurityGateTests(unittest.TestCase):
             self.assertNotIn('rationale', checks.json.dumps(summary))
             self.assertNotIn('sourceSha256', checks.json.dumps(summary))
 
-    def test_retired_bypass_exception_cannot_suppress_a_reappearing_finding(self):
+    def test_login_bypass_finding_blocks_without_its_exact_review(self):
         exceptions = checks.load_sast_exceptions()
         self.assertTrue(exceptions)
-        self.assertEqual({'java/spring-disabled-csrf-protection'}, {rule for rule, file in exceptions})
+        self.assertEqual({'java/spring-disabled-csrf-protection', 'java/user-controlled-bypass'}, {rule for rule, file in exceptions})
         rule = 'java/user-controlled-bypass'
         document = {'runs': [{'tool': {'driver': {'name': 'CodeQL', 'rules': [
             {'id': rule, 'properties': {'security-severity': '7.8'}}]}},
@@ -59,9 +59,26 @@ class SecurityGateTests(unittest.TestCase):
                 {'ruleId': rule, 'locations': [{'physicalLocation': {
                     'artifactLocation': {'uri': 'src/main/java/com/lookahead/learning/content/gateway/GatewayController.java'}}}]}]}]}
         findings = []
+        self.assertEqual(0, checks.sarif_gate([document], findings, exceptions))
+        self.assertEqual('reviewed-exception', findings[0]['disposition'])
+        self.assertEqual('DLV-918', findings[0]['ticket'])
+        exceptions.pop((rule, 'src/main/java/com/lookahead/learning/content/gateway/GatewayController.java'))
+        findings = []
         self.assertEqual(1, checks.sarif_gate([document], findings, exceptions))
         self.assertEqual('requires-action', findings[0]['disposition'])
         self.assertIsNone(findings[0]['ticket'])
+
+    def test_full_repository_analysis_rejects_incremental_or_invalid_scope(self):
+        run = {'tool': {'driver': {'name': 'CodeQL', 'rules': [{'id': 'fixture'}]}},
+               'results': [], 'invocations': [{'executionSuccessful': True}]}
+        for properties in ({'incrementalMode': 'diff-informed'}, {'incrementalMode': 'overlay'},
+                           {'incrementalMode': 'diff-informed,overlay'}, {'incrementalMode': True}, []):
+            with self.subTest(properties=properties), self.assertRaisesRegex(ValueError, '^SAST full analysis required$'):
+                checks.sarif_gate([{'runs': [{**run, 'properties': properties}]}])
+        self.assertEqual(0, checks.sarif_gate([{'runs': [run]}]))
+        workflow = checks.json.loads((checks.ROOT / '.github/workflows/ci.yml').read_text())
+        self.assertEqual('false', workflow['jobs']['verify']['env']['CODEQL_ACTION_DIFF_INFORMED_QUERIES'])
+        self.assertEqual('false', workflow['jobs']['verify']['env']['CODEQL_ACTION_OVERLAY_ANALYSIS'])
 
     def test_public_failure_reason_exposes_only_reviewed_constants(self):
         for reason in checks.SAFE_SAST_FAILURES:

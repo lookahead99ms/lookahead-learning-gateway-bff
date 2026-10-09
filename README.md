@@ -297,9 +297,13 @@ access. Reusing a sign-in needs an authenticated server session, its stored
 client and successful Domain verification. `CloudGatewaySecurityIntegrationTest`
 covers missing clients, anonymous callers, rejected Domain verification and
 forced reauthentication; existing CSRF and restricted-session regressions remain
-active. The completed October 9 CodeQL run no longer reports the previous
-`java/user-controlled-bypass` finding, so its unused exception was removed.
-If the finding returns, it blocks without a new source-bound review.
+active. Earlier October 9 PR analysis omitted the bypass finding, but main analysis
+reported it again. The completed full scan still reports the fresh-OAuth branch
+after the control-flow clarification. Its reviewed false-positive disposition is
+bound to the exact current file SHA and rule, expires October 19, 2026, and is
+owned by DLV-918. Request-parameter variants cannot grant access. Full-scan
+configuration below remains required; changed-source, unused, expired or
+unreviewed dispositions continue to block. New hosted proof remains required.
 
 On October 9, 2026, the pinned AMD64 candidates passed complete base/final
 package scans and the isolated three-application Local authentication contract
@@ -312,3 +316,25 @@ metadata and `unusedSastExceptions` before failing. Review the exact rule/file
 against the completed scan before retiring an exception; absence is not automatic
 approval. Missing analysis, warnings, expired or changed-source exceptions and
 unreviewed findings still block. SARIF messages and source snippets are not printed.
+
+PR and main SAST gates require full repository analysis. Diff-informed and
+overlay analysis are explicitly disabled in the pinned action; incremental SARIF
+is rejected. An alert disappearing from changed-lines-only analysis is not proof
+that its exception is obsolete. New authentication control flow always terminates
+fresh OAuth before reuse, and Domain compares missing credentials unconditionally
+before denying authentication. Hosted full-scan proof remains required.
+
+The dormant `release-image.yml` manual workflow reuses the full CI job, then
+exports its exact scanned image as a one-day archive. Publication loads that
+archive without rebuilding, validates source/Dockerfile/workflow/archive/config
+digests, and uses a separately reviewed DEV OIDC role. It requires an exact main
+SHA, immutable DEV ECR repository and a protected `dev` environment with independent
+review and protected-branch restriction. Unsupported private-repository approval
+features block this workflow; a manual trigger alone is insufficient. Registry
+receipt verifies remote manifest/config identity. No workflow was dispatched or
+image published locally. Configure approved settings and action allowlists before
+activation; private content and AWS credentials are never bundled in the image.
+
+Publication explicitly pushes only the verified `linux/amd64` manifest (Docker API
+1.46 or newer). The registry receipt checks its config digest against the saved
+archive; Docker Desktop index IDs are kept separate from that config identity.

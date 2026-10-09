@@ -8,6 +8,14 @@
       "expiresAt": "2026-10-19",
       "ticket": "DLV-804",
       "rationale": "This narrow pass-through chain does not authenticate or mutate state itself; it forwards the browser session and CSRF token to Identity, which validates both. The gateway's own authenticated BFF chain retains CSRF protection."
+    },
+    {
+      "ruleId": "java/user-controlled-bypass",
+      "file": "src/main/java/com/lookahead/learning/content/gateway/GatewayController.java",
+      "sourceSha256": "9d04b0f778ac3d1018a44d3c24310b2e76ddcd8eafbceffbdf029e6033d18b4a",
+      "expiresAt": "2026-10-19",
+      "ticket": "DLV-918",
+      "rationale": "The browser reauthenticate=true parameter terminates session reuse by starting a fresh OAuth authorization flow; it never grants access or creates authentication. Reuse otherwise requires an OAuth2AuthenticationToken from the server security context, its stored authorized client, and Domain auth/me HTTP 200 using that client bearer and Gateway sign-in proof. Anonymous, missing-client and Domain-rejected sessions start OAuth. CloudGatewaySecurityIntegrationTest verifies these boundaries. Reviewed against the reported completed full scan; exact whole-source binding and expiry apply."
     }
   ]
 }
