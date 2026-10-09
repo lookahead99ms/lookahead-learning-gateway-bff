@@ -7,7 +7,15 @@
         "main"
       ]
     },
-    "workflow_dispatch": {}
+    "workflow_dispatch": {},
+    "workflow_call": {
+      "inputs": {
+        "export-image": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
   },
   "permissions": {
     "contents": "read"
@@ -38,6 +46,10 @@
         {
           "name": "Test security gates with clean, finding and incomplete fixtures",
           "run": "python3 -m unittest discover -s tools/security -p 'test_*.py'"
+        },
+        {
+          "name": "Verify immutable image binding",
+          "run": "python3 -m unittest discover -s tools/release -p 'test_*.py'"
         },
         {
           "name": "Initialize Java security analysis",
@@ -97,8 +109,29 @@
         {
           "name": "Scan exact builder base, runtime base and built application image",
           "run": "python3 tools/security/check.py images --image lookahead-gateway-bff:ci"
+        },
+        {
+          "name": "Export the exact scanned release image",
+          "if": "inputs.export-image == true",
+          "run": "python3 tools/release/image.py export --image lookahead-gateway-bff:ci --directory \"$RUNNER_TEMP/release-image\""
+        },
+        {
+          "name": "Retain immutable image for the same release run",
+          "if": "inputs.export-image == true",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "release-image-${{ github.sha }}",
+            "path": "${{ runner.temp }}/release-image/",
+            "retention-days": 1,
+            "if-no-files-found": "error",
+            "compression-level": 0
+          }
         }
-      ]
+      ],
+      "env": {
+        "CODEQL_ACTION_DIFF_INFORMED_QUERIES": "false",
+        "CODEQL_ACTION_OVERLAY_ANALYSIS": "false"
+      }
     }
   }
 }

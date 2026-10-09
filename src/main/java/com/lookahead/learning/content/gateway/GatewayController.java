@@ -32,7 +32,13 @@ public class GatewayController {
     }
     @GetMapping("/bff/login")
     public void login(@RequestParam(required=false) String returnTo,HttpServletRequest request,HttpServletResponse response) throws java.io.IOException {
-        if(settings.cloud()&&!"true".equals(request.getParameter("reauthenticate"))) {
+        // A browser may request a fresh OAuth flow, never skip verification and
+        // continue into the sign-in reuse path.
+        if(settings.cloud()&&"true".equals(request.getParameter("reauthenticate"))) {
+            startOAuth(returnTo,request,response);
+            return;
+        }
+        if(settings.cloud()) {
             var authentication=SecurityContextHolder.getContext().getAuthentication();
             if(authentication instanceof OAuth2AuthenticationToken) {
                 var client=clients.<OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",authentication,request);
@@ -42,6 +48,9 @@ public class GatewayController {
                 }
             }
         }
+        startOAuth(returnTo,request,response);
+    }
+    private void startOAuth(String returnTo,HttpServletRequest request,HttpServletResponse response) throws java.io.IOException {
         request.getSession().setAttribute("learningReturnTo",GatewayConfiguration.safeReturn(returnTo));
         response.setHeader("Cache-Control","no-store");response.sendRedirect(settings.frontend()+"/oauth2/authorization/lookahead");
     }
