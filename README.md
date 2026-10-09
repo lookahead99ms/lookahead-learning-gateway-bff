@@ -292,14 +292,14 @@ activation, network, IAM and cloud profile verification.
 
 
 
-The reviewed `java/user-controlled-bypass` login finding is source-bound to
-`GatewayController.java` and expires on 2026-10-19. The request's reauthenticate
-parameter can force fresh OAuth; it cannot grant access. Reusing a sign-in needs
-an authenticated server session, its stored client and successful Domain
-verification. `CloudGatewaySecurityIntegrationTest` covers missing clients,
-anonymous callers, rejected Domain verification and forced reauthentication;
-existing CSRF and restricted-session regressions remain active. Any controller
-source change or expiry requires a new review; other findings remain blocking.
+The request's reauthenticate parameter can force fresh OAuth; it cannot grant
+access. Reusing a sign-in needs an authenticated server session, its stored
+client and successful Domain verification. `CloudGatewaySecurityIntegrationTest`
+covers missing clients, anonymous callers, rejected Domain verification and
+forced reauthentication; existing CSRF and restricted-session regressions remain
+active. The completed October 9 CodeQL run no longer reports the previous
+`java/user-controlled-bypass` finding, so its unused exception was removed.
+If the finding returns, it blocks without a new source-bound review.
 
 On October 9, 2026, the pinned AMD64 candidates passed complete base/final
 package scans and the isolated three-application Local authentication contract
