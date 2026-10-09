@@ -13,6 +13,7 @@ import java.util.Set;
 /** Public Identity routes only. Identity owns its session, CSRF checks and authentication. */
 @RestController
 @Profile("gateway")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnExpression("'${app.deployment-environment:local}' == 'local'")
 public class IdentityProxyController {
     public static final String[] PATHS = {"/api/v1/auth/options", "/api/v1/auth/csrf",
             "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/continue", "/api/v1/auth/logout",

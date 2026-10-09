@@ -1,5 +1,22 @@
+// DLV-918: plugin dependencies have a separate classpath from the application.
+buildscript {
+    configurations.configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group.startsWith('tools.jackson')) {
+                useVersion '3.1.7'
+                because 'DLV-918: patched Jackson 3.1 line for runtime and build tooling'
+            }
+            if (requested.group == 'org.apache.commons' && requested.name == 'commons-lang3') {
+                useVersion '3.18.0'
+                because 'DLV-918: fixed uncontrolled recursion in Commons Lang'
+            }
+        }
+    }
+}
+
 plugins {
     id 'java'
+    id 'jacoco'
     id 'org.springframework.boot' version '4.1.1'
 }
 
@@ -36,6 +53,10 @@ dependencies {
 // upgrading to a Boot patch that manages the fixed version (docs/security-ci.md).
 configurations.configureEach {
     resolutionStrategy.eachDependency {
+        if (requested.group.startsWith('tools.jackson')) {
+            useVersion '3.1.7'
+            because 'DLV-918: patched Jackson 3.1 family pending a compatible Boot patch'
+        }
         if (requested.group == 'org.apache.tomcat.embed') {
             useVersion '11.0.25'
             because 'DLV-916: patched embedded Tomcat pending the next compatible Boot release'
@@ -51,6 +72,38 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
+}
+
+jacoco {
+    toolVersion = '0.8.15'
+}
+
+// Report every production class. Run the complete test suite before interpreting
+// this report; a filtered test invocation intentionally covers only that slice.
+tasks.named('jacocoTestReport') {
+    dependsOn tasks.named('test')
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+tasks.named('jacocoTestCoverageVerification') {
+    dependsOn tasks.named('test')
+    violationRules {
+        rule {
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.85
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('jacocoTestReport'), tasks.named('jacocoTestCoverageVerification')
 }
 
 springBoot {

@@ -1,6 +1,6 @@
 # Logical sign-in API source notes
 
-DLV-920 Gateway mappings below are exact, with no wildcard forwarding. Identity owns authentication, account ownership, CSRF and durable admission/revocation. Requests use Identity CSRF obtained from `/api/v1/auth/csrf`, including the restricted challenge flow; the BFF CSRF token is different.
+DLV-920 Gateway mappings below are exact, with no wildcard forwarding. In Local, Identity owns authentication, account ownership, CSRF and durable admission/revocation. Requests use Identity CSRF obtained from `/api/v1/auth/csrf`, including the restricted challenge flow; the BFF CSRF token is different.
 
 | Method | Path | JSON request |
 | --- | --- | --- |
@@ -26,3 +26,58 @@ return-path check uses the same destination. Unrecognized Delivery Plan subpaths
 fall back to `/`; the page and its private data still require the Author grant.
 
 These are Gateway source notes for the private generated API reference. Identity defines the authoritative inventory/challenge response schemas and error catalogue. Full cross-service admission/concurrency verification remains a release gate owned by the parent DLV-920 work; Gateway unit/transport tests alone do not prove it.
+
+
+## Cloud mode (`dev` / `prod`)
+
+The seven browser routes above remain stable. Cognito authenticates the user;
+Domain owns `(issuer, subject)` account mapping, durable admission and revocation;
+Gateway holds OAuth tokens, proof/challenge secrets and session CSRF. The Local
+Identity controller and proxy security chain are inactive. Cloud additionally
+serves GET/POST `/api/v1/account/profile`, POST `/api/v1/account/password`, and
+`/api/v1/auth/options` with `managedLogin: true`.
+
+`/api/v1/auth/csrf` and `/bff/api/v1/auth/csrf` use the same Gateway session token.
+All cloud mutations require it. Browser authorization, proof, challenge and
+internal-service secret headers are never forwarded. Gateway generates a random
+proof and sends it with its provider access token to Domain. Only the exact
+internal account action paths receive the injected Gateway service secret.
+Domain responses are capped at 16 KiB and infrastructure errors are sanitized.
+
+An OAuth callback first requests Domain admission. A pending replacement result
+redirects to `/sign-in/choose?returnTo=...`, preserving a sanitized destination.
+It can retrieve CSRF and read/replace/cancel the restricted challenge, but cannot
+access ordinary accounts, BFF data, author previews or content. Rejected ordinary
+requests preserve the challenge so UI bootstrap cannot erase the pending choice.
+Successful replacement keeps its server-side challenge for an idempotent retry
+until `/bff/login` confirms Domain `/api/v1/auth/me` and clears the challenge.
+No extra Cognito login is required for that admitted continuation.
+
+Every admitted private BFF request still checks Domain; no positive validity is
+cached. Fresh authentication requires the managed sign-in redirect and explicit
+resubmission of the intended change. Successful password change/current-session
+revocation clears OAuth credentials and invalidates the Gateway session. An
+unconfirmed password response preserves the browser session for recovery; Domain
+remains authoritative about whether credentials or durable admission changed.
+
+Logout first asks Domain to revoke durable admission. Failure returns 503 without
+claiming logout. Once Domain confirms denial, Gateway attempts provider refresh
+token revocation and clears local OAuth/session state even if that provider call
+fails. The response reports `providerRevocationConfirmed` separately and returns
+`/bff/logout/complete` on the configured frontend origin. The bridge redirects to
+Cognito managed logout with fixed client ID and fixed `/sign-in` return URI; tokens
+are never embedded in a browser URL.
+
+These paths are locally verified with controlled HTTP fixtures and the actual
+Spring Security filter chain. AWS endpoint behavior, deployment topology and
+cross-instance recovery remain separate release gates.
+
+Cloud Domain transport defaults to HTTPS. The explicit deployment setting
+`LOOKAHEAD_DOMAIN_TRANSPORT=service-connect-tls` permits only
+`LOOKAHEAD_DOMAIN_UPSTREAM=http://domain:8080`, the selected ECS Service Connect
+client alias. The application-to-proxy hop is HTTP; Infra owns TLS between tasks
+and prevents direct plaintext ingress. This setting changes no browser API or
+authorization contract. Provider endpoints retain HTTPS and standard trust;
+requests never follow redirects. Local keeps its existing transport configuration.
+Controlled-response tests do not establish deployed proxy encryption or certificate
+rotation; those remain release evidence requirements.

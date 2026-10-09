@@ -72,3 +72,6 @@ docs/private/
 private/
 *.private.*
 docs/account-persistence-contract.proposed.md
+
+# Generated IDE resource/class output; preserve locally, never publish.
+/bin/

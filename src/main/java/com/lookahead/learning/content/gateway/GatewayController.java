@@ -32,6 +32,16 @@ public class GatewayController {
     }
     @GetMapping("/bff/login")
     public void login(@RequestParam(required=false) String returnTo,HttpServletRequest request,HttpServletResponse response) throws java.io.IOException {
+        if(settings.cloud()&&!"true".equals(request.getParameter("reauthenticate"))) {
+            var authentication=SecurityContextHolder.getContext().getAuthentication();
+            if(authentication instanceof OAuth2AuthenticationToken) {
+                var client=clients.<OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",authentication,request);
+                if(client!=null) {
+                    int status=http.get().uri(settings.domainApiUpstream()+"/api/v1/auth/me").headers(h->{h.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,h);}).exchange((sent,received)->received.getStatusCode().value());
+                    if(status==200){request.getSession().removeAttribute(CloudGatewaySessions.CHALLENGE);response.sendRedirect(settings.frontend()+GatewayConfiguration.safeReturn(returnTo));return;}
+                }
+            }
+        }
         request.getSession().setAttribute("learningReturnTo",GatewayConfiguration.safeReturn(returnTo));
         response.setHeader("Cache-Control","no-store");response.sendRedirect(settings.frontend()+"/oauth2/authorization/lookahead");
     }
@@ -41,6 +51,7 @@ public class GatewayController {
     }
     @PostMapping("/bff/api/v1/auth/logout")
     public ApiResponse<Map<String,String>> logout(HttpServletRequest request,HttpServletResponse response,Authentication authentication) {
+        if(settings.cloud())return cloudLogout(request,response,authentication);
         var client=clients.loadAuthorizedClient("lookahead",authentication,request);
         if(client!=null) {
             revoke(client.getAccessToken().getTokenValue());
@@ -52,6 +63,32 @@ public class GatewayController {
         String url=settings.issuer()+"/connect/logout?post_logout_redirect_uri="+encode(settings.frontend()+"/sign-in");
         if(idToken!=null)url+="&id_token_hint="+encode(idToken);
         response.setHeader("Cache-Control","no-store");return ApiResponse.success(Map.of("logoutUrl",url));
+    }
+    private ApiResponse<Map<String,String>> cloudLogout(HttpServletRequest request,HttpServletResponse response,Authentication authentication) {
+        var client=manager.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead").principal(authentication)
+            .attributes(a->{a.put(HttpServletRequest.class.getName(),request);a.put(HttpServletResponse.class.getName(),response);}).build());
+        boolean providerConfirmed=false;
+        if(client!=null) {
+            var result=new CloudGatewaySessions(settings,http).call("logout",client.getAccessToken().getTokenValue(),request,Map.of());
+            if(result.status()!=200&&result.status()!=401)throw new org.springframework.web.client.RestClientException("Domain sign-out could not be confirmed");
+            if(client.getRefreshToken()!=null) {
+                try {
+                    var form=new LinkedMultiValueMap<String,String>();form.add("token",client.getRefreshToken().getTokenValue());form.add("token_type_hint","refresh_token");
+                    http.post().uri(settings.managedLogin()+"/oauth2/revoke").headers(h->h.setBasicAuth(settings.clientId(),settings.clientSecret()))
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED).body(form).retrieve().toBodilessEntity();providerConfirmed=true;
+                } catch(RuntimeException unavailable) { /* Durable Domain denial already committed. Report provider uncertainty. */ }
+            }
+        }
+        clients.removeAuthorizedClient("lookahead",authentication,request,response);
+        var session=request.getSession(false);if(session!=null)session.invalidate();SecurityContextHolder.clearContext();
+        response.setHeader("Cache-Control","no-store");
+        return ApiResponse.success(Map.of("logoutUrl",settings.frontend()+"/bff/logout/complete","providerRevocationConfirmed",Boolean.toString(providerConfirmed)));
+    }
+    @GetMapping("/bff/logout/complete")
+    public void cloudLogoutComplete(HttpServletResponse response)throws java.io.IOException {
+        if(!settings.cloud()){response.setStatus(404);return;}
+        response.setHeader("Cache-Control","no-store");
+        response.sendRedirect(settings.managedLogin()+"/logout?client_id="+encode(settings.clientId())+"&logout_uri="+encode(settings.frontend()+"/sign-in"));
     }
     private void revoke(String token) {
         var form=new LinkedMultiValueMap<String,String>();form.add("token",token);
@@ -84,7 +121,7 @@ public class GatewayController {
             var client=manager.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead").principal(authentication)
                     .attributes(attributes->{attributes.put(HttpServletRequest.class.getName(),request);attributes.put(HttpServletResponse.class.getName(),response);}).build());
             if(client==null)return ResponseEntity.status(401).build();
-            outgoing.headers(headers->headers.setBearerAuth(client.getAccessToken().getTokenValue()));
+            outgoing.headers(headers->{headers.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,headers);});
         }
         // No browser Authorization, Cookie, Origin, forwarding headers, or arbitrary upstream is relayed.
         return outgoing.body(body).exchange((sent,received)->{

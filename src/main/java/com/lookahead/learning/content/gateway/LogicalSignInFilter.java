@@ -14,7 +14,7 @@ import org.springframework.security.oauth2.core.OAuth2AuthorizationException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** No cached validity: Identity-backed Domain verification protects every private BFF request. */
+/** No cached validity: Domain verification protects every private BFF request. */
 final class LogicalSignInFilter extends OncePerRequestFilter {
     private final OAuth2AuthorizedClientManager clients;
     private final RestClient http;
@@ -28,13 +28,25 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
 
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return !(path.startsWith("/bff/api/v1/") || path.startsWith("/bff/author/previews/"))
+        return !(path.startsWith("/bff/api/v1/") || path.startsWith("/bff/author/previews/")
+                || settings.cloud() && CloudGatewaySessions.restricted(request) && path.startsWith("/content/"))
                 || path.equals("/bff/api/v1/auth/logout");
     }
 
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
             FilterChain chain) throws ServletException, IOException {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (settings.cloud() && CloudGatewaySessions.restricted(request)) {
+            if (request.getRequestURI().equals("/bff/api/v1/auth/csrf")) {
+                chain.doFilter(request, response);
+                return;
+            }
+            response.setStatus(401);
+            response.setHeader("Cache-Control", "no-store");
+            response.setContentType("application/json");
+            response.getWriter().write("{\"code\":\"SIGN_IN_CHALLENGE_REQUIRED\",\"message\":\"Choose an active sign-in to continue.\"}");
+            return;
+        }
         if (!(authentication instanceof OAuth2AuthenticationToken)) {
             chain.doFilter(request, response);
             return;
@@ -47,7 +59,7 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
                         attributes.put(HttpServletResponse.class.getName(), response);
                     }).build());
             status = client == null ? 401 : http.get().uri(settings.domainApiUpstream() + "/api/v1/auth/me")
-                    .headers(headers -> headers.setBearerAuth(client.getAccessToken().getTokenValue()))
+                    .headers(headers -> {headers.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,headers);})
                     .exchange((sent, received) -> received.getStatusCode().value());
         } catch (OAuth2AuthorizationException rejected) {
             status = "invalid_grant".equals(rejected.getError().getErrorCode()) ? 401 : 503;

@@ -29,12 +29,18 @@ management:
 app:
   deployment-environment: ${LOOKAHEAD_ENVIRONMENT}
   oauth:
-    issuer: ${LOOKAHEAD_OAUTH_ISSUER}
+    issuer: ${LOOKAHEAD_OAUTH_ISSUER:}
     frontend: ${LOOKAHEAD_FRONTEND_ORIGIN}
     client-id: ${APP_OAUTH_CLIENT_ID:lookahead-web-gateway}
     client-secret: ${LOOKAHEAD_GATEWAY_CLIENT_SECRET}
-    identity-upstream: ${LOOKAHEAD_IDENTITY_UPSTREAM}
+    identity-upstream: ${LOOKAHEAD_IDENTITY_UPSTREAM:}
     domain-api-upstream: ${LOOKAHEAD_DOMAIN_UPSTREAM}
+    domain-transport: ${LOOKAHEAD_DOMAIN_TRANSPORT:https}
+  cognito:
+    issuer: ${LOOKAHEAD_COGNITO_ISSUER:}
+    managed-login: ${LOOKAHEAD_COGNITO_MANAGED_LOGIN:}
+    scope-prefix: ${LOOKAHEAD_COGNITO_SCOPE_PREFIX:}
+    gateway-secret: ${LOOKAHEAD_DOMAIN_GATEWAY_SECRET:}
   gateway:
     identity-cookie-name: ${LOOKAHEAD_IDENTITY_COOKIE_NAME:LOOKAHEAD_SESSION}
     sign-in-binding-cookie-name: ${LOOKAHEAD_SIGNIN_BINDING_COOKIE_NAME:LOOKAHEAD_SIGNIN_BINDING}

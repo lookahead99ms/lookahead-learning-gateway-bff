@@ -23,6 +23,7 @@ import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 public class GatewayConfiguration {
     /** Identity validates its own session and CSRF; OAuth client filters must not consume its form bodies. */
     @Bean @Order(1)
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression("'${app.deployment-environment:local}' == 'local'")
     SecurityFilterChain identityProxySecurity(HttpSecurity http) throws Exception {
         http.securityMatcher(IdentityProxyController.PATHS)
                 .csrf(AbstractHttpConfigurer::disable)
@@ -48,7 +49,10 @@ public class GatewayConfiguration {
         http.addFilterAfter(new LogicalSignInFilter(manager, gatewayHttp, settings),
                 org.springframework.security.web.context.SecurityContextHolderFilter.class);
         var resolver=new DefaultOAuth2AuthorizationRequestResolver(clients,"/oauth2/authorization");
-        resolver.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce());
+        resolver.setAuthorizationRequestCustomizer(builder->{
+            OAuth2AuthorizationRequestCustomizers.withPkce().accept(builder);
+            if(settings.cloud())builder.additionalParameters(p->p.put("prompt","login"));
+        });
         http.headers(headers -> headers.frameOptions(frame -> frame.disable())
                 .addHeaderWriter(new GatewayFrameHeaders()));
         http.csrf(csrf->csrf.csrfTokenRepository(new HttpSessionCsrfTokenRepository()))
@@ -56,10 +60,10 @@ public class GatewayConfiguration {
                 .logout(AbstractHttpConfigurer::disable).requestCache(AbstractHttpConfigurer::disable)
                 .sessionManagement(session->session.sessionFixation(fixation->fixation.changeSessionId()))
                 .authorizeHttpRequests(auth->auth
-                        .requestMatchers("/bff/login","/bff/api/v1/auth/csrf","/oauth2/authorization/**","/login/oauth2/code/**","/content/**","/actuator/health","/actuator/health/**").permitAll()
+                        .requestMatchers("/bff/login","/bff/logout/complete","/bff/api/v1/auth/csrf","/oauth2/authorization/**","/login/oauth2/code/**","/content/**","/actuator/health","/actuator/health/**","/api/v1/auth/options","/api/v1/auth/csrf").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/bff/author/previews/**").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.HEAD, "/bff/author/previews/**").authenticated()
-                        .requestMatchers("/bff/api/v1/**").authenticated().anyRequest().denyAll())
+                        .requestMatchers("/bff/api/v1/**","/api/v1/account/**","/api/v1/auth/sign-in-challenge/**").authenticated().anyRequest().denyAll())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint(handlers::authenticationRequired)
                         .accessDeniedHandler(handlers::accessDenied))
