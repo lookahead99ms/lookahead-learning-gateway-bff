@@ -106,18 +106,26 @@ public class GatewayController {
     }
     private static String encode(String value) { return URLEncoder.encode(value,StandardCharsets.UTF_8); }
 
-    @RequestMapping(value={"/bff/api/v1/**","/content/**"},method={RequestMethod.GET,RequestMethod.POST,RequestMethod.DELETE})
+    /** DLV-928: platform review uploads carry up to six 5 MB images (20 MB) plus the item text. */
+    static final int PLATFORM_REVIEW_BODY_BYTES = 21 * 1024 * 1024;
+    @RequestMapping(value={"/bff/api/v1/**","/content/**"},method={RequestMethod.GET,RequestMethod.POST,RequestMethod.PUT,RequestMethod.DELETE})
     public ResponseEntity<byte[]> proxy(HttpServletRequest request,HttpServletResponse response,Authentication authentication) throws java.io.IOException {
         String route=request.getRequestURI();String upstreamPath=route.startsWith("/bff/")?route.substring(4):route;
         boolean content=upstreamPath.startsWith("/content/") && request.getMethod().equals("GET");
         boolean account=upstreamPath.equals("/api/v1/auth/me") || upstreamPath.equals("/api/v1/account-catalog")
                 || upstreamPath.equals("/api/v1/support") || upstreamPath.equals("/api/v1/plans") || upstreamPath.startsWith("/api/v1/plans/");
+        boolean staffAccess = ("GET".equals(request.getMethod()) && java.util.Set.of("/api/v1/account/permissions", "/api/v1/admin/access", "/api/v1/admin/access/catalog").contains(upstreamPath)
+                || "POST".equals(request.getMethod()) && java.util.Set.of("/api/v1/admin/access", "/api/v1/admin/access/lookup").contains(upstreamPath)) && request.getQueryString()==null;
         boolean execution = executionRoute(request.getMethod(), upstreamPath) && request.getQueryString() == null;
         boolean authorReview = authorReviewRoute(request.getMethod(), upstreamPath)
                 && (!"POST".equals(request.getMethod()) || request.getQueryString() == null);
-        if(!content && !account && !execution && !authorReview)return ResponseEntity.notFound().build();
-        if (authorReview && !(authentication instanceof OAuth2AuthenticationToken)) return ResponseEntity.status(401).build();
-        int bodyLimit = authorReview ? 16 * 1024 : execution ? 512 * 1024 : 8 * 1024 * 1024;
+        boolean platformReview = platformReviewRoute(request.getMethod(), upstreamPath)
+                && ("GET".equals(request.getMethod()) || request.getQueryString() == null);
+        // PUT exists only for platform reviews; every other route keeps its earlier methods.
+        if("PUT".equals(request.getMethod()) && !platformReview)return ResponseEntity.status(405).header(HttpHeaders.CACHE_CONTROL,"no-store").build();
+        if(!content && !account && !execution && !authorReview && !platformReview && !staffAccess)return ResponseEntity.notFound().build();
+        if ((authorReview || platformReview || staffAccess) && !(authentication instanceof OAuth2AuthenticationToken)) return ResponseEntity.status(401).build();
+        int bodyLimit = (authorReview || staffAccess) ? 16 * 1024 : execution ? 512 * 1024 : platformReview ? PLATFORM_REVIEW_BODY_BYTES : 8 * 1024 * 1024;
         byte[] body=request.getInputStream().readNBytes(bodyLimit + 1);
         if(body.length>bodyLimit)return ResponseEntity.status(413).build();
         String target=settings.domainApiUpstream()+upstreamPath+(request.getQueryString()==null?"":"?"+request.getQueryString());
@@ -147,6 +155,19 @@ public class GatewayController {
         return "GET".equals(method) && "/api/v1/author/review-artifacts".equals(path)
                 || ("GET".equals(method) || "POST".equals(method))
                 && path.matches("/api/v1/author/review-artifacts/[a-z0-9][a-z0-9-]{0,79}/events");
+    }
+
+    private static final String PLATFORM_REVIEW_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    static boolean platformReviewRoute(String method, String path) {
+        String root = "/api/v1/platform-reviews", item = root + "/" + PLATFORM_REVIEW_ID;
+        return switch (method) {
+            case "GET" -> path.equals(root) || path.equals(root + "/me") || path.matches(item)
+                    || path.matches(item + "/attachments/" + PLATFORM_REVIEW_ID);
+            case "POST" -> path.equals(root);
+            case "PUT" -> path.matches(item) || path.matches(item + "/triage");
+            case "DELETE" -> path.matches(item);
+            default -> false;
+        };
     }
 
     static boolean executionRoute(String method, String path) {

@@ -1,6 +1,10 @@
 spring:
   application:
     name: lookahead-learning-gateway-bff
+  servlet:
+    # The Gateway relays upload bytes (DLV-928 platform reviews) to Domain unparsed; Domain owns multipart limits.
+    multipart:
+      enabled: false
   config:
     import: optional:configtree:${LOOKAHEAD_SECRETS_DIRECTORY:/run/secrets/}
 server:

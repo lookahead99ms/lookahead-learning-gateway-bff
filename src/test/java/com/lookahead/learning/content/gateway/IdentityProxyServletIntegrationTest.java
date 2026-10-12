@@ -157,6 +157,32 @@ class IdentityProxyServletIntegrationTest {
             assertThat(received.csrf()).isEqualTo("identity-csrf");
             assertThat(received.authorization()).isNull();
         }
+        for (String path : new String[]{"/api/v1/account/preferences", "/api/v1/account/links"}) {
+            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+                    .header("Cookie", "LOOKAHEAD_GATEWAY=gateway; LOOKAHEAD_TEST_IDENTITY=identity-session")
+                    .header("X-CSRF-TOKEN", "identity-csrf")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer not-forwarded")
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"theme\":\"dark\"}"));
+            assertThat(browser.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+            var received = RECEIVED.remove();
+            assertThat(received.path()).isEqualTo(path);
+            assertThat(received.body()).isEqualTo("{\"theme\":\"dark\"}");
+            assertThat(received.cookie()).isEqualTo("LOOKAHEAD_TEST_IDENTITY=identity-session");
+            assertThat(received.csrf()).isEqualTo("identity-csrf");
+            assertThat(received.authorization()).isNull();
+            // Identity, not the BFF chain, decides CSRF for these routes.
+            var withoutCsrf = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+                    .header("Cookie", "LOOKAHEAD_TEST_IDENTITY=identity-session")
+                    .POST(HttpRequest.BodyPublishers.ofString("{}")).build();
+            assertThat(browser.send(withoutCsrf, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
+            assertThat(RECEIVED.remove().path()).isEqualTo(path);
+            for (String method : new String[]{"GET", "PUT", "DELETE", "PATCH", "HEAD"}) {
+                var rejected = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+                        .method(method, HttpRequest.BodyPublishers.noBody()).build();
+                assertThat(browser.send(rejected, HttpResponse.BodyHandlers.ofString()).statusCode()).isIn(401, 403, 405);
+            }
+        }
         // Rejected MVC methods can traverse the protected error dispatch; none may reach Identity.
         assertThat(get("/api/v1/account/password").statusCode()).isIn(401, 403, 405);
         for (String method : new String[]{"PUT", "DELETE", "PATCH", "HEAD"}) {
@@ -190,7 +216,8 @@ class IdentityProxyServletIntegrationTest {
                 String authorization = exchange.getRequestHeaders().getFirst("Authorization");
                 RECEIVED.add(new UpstreamRequest(path, body, cookie, csrf, authorization));
                 int status = 200;
-                if (path.equals("/api/v1/account/profile") || path.equals("/api/v1/account/password")) {
+                if (path.equals("/api/v1/account/profile") || path.equals("/api/v1/account/password")
+                        || path.equals("/api/v1/account/preferences") || path.equals("/api/v1/account/links")) {
                     if (!"identity-csrf".equals(csrf) || !"LOOKAHEAD_TEST_IDENTITY=identity-session".equals(cookie)) status = 403;
                 } else if (path.equals("/api/v1/auth/login")) {
                     if (!"identity-csrf".equals(csrf) || !"LOOKAHEAD_TEST_IDENTITY=identity-session".equals(cookie)) status = 403;

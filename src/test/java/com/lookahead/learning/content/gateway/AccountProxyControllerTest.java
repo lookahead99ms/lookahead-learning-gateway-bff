@@ -90,6 +90,61 @@ class AccountProxyControllerTest {
         assertThat(session.isInvalid()).isFalse();
     }
 
+    @ParameterizedTest @ValueSource(strings = {"/api/v1/account/preferences", "/api/v1/account/links"})
+    void preferencesAndLinksRelayBodyCsrfAndAuthoritativeResponseWithoutClearingSession(String path) throws Exception {
+        var request = request("POST", path);
+        var session = new MockHttpSession();
+        request.setSession(session);
+        request.addHeader("X-CSRF-TOKEN", "identity-csrf");
+        request.setCookies(new Cookie("IDENTITY_TEST", "identity-session"), new Cookie("GATEWAY_TEST", "gateway-session"));
+        String body = path.endsWith("links")
+                ? "{\"github\":\"https://github.com/learner\",\"linkedin\":null,\"x\":\"\",\"website\":null}"
+                : "{\"theme\":\"dark\"}";
+        request.setContent(body.getBytes(StandardCharsets.UTF_8));
+        String payload = "{\"data\":{\"accountId\":\"synthetic-id\",\"themePreference\":\"dark\",\"links\":{\"github\":null,\"linkedin\":null,\"x\":null,\"website\":null}}}";
+        upstream.expect(requestTo("http://identity:8080" + path))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-CSRF-TOKEN", "identity-csrf"))
+                .andExpect(header(HttpHeaders.COOKIE, "IDENTITY_TEST=identity-session"))
+                .andExpect(content().string(body))
+                .andRespond(withSuccess(payload, MediaType.APPLICATION_JSON));
+        var response = account.preferences(request);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
+        assertThat(new String(response.getBody(), StandardCharsets.UTF_8)).isEqualTo(payload);
+        assertThat(response.getHeaders().get(HttpHeaders.SET_COOKIE)).isNull();
+        assertThat(session.isInvalid()).isFalse();
+    }
+
+    @ParameterizedTest @ValueSource(ints = {401, 403, 422, 500, 503})
+    void preferencesAndLinksKeepIdentityErrorsAndSanitizeInfrastructureFailures(int status) throws Exception {
+        String[] paths = {"/api/v1/account/preferences", "/api/v1/account/links"};
+        for (String path : paths)
+            upstream.expect(requestTo("http://identity:8080" + path))
+                    .andRespond(withStatus(HttpStatus.valueOf(status)).body(status >= 500 ? "database secret details" : "{\"code\":\"INVALID_PROFILE_LINK\"}"));
+        for (String path : paths) {
+            var request = request("POST", path);
+            var session = new MockHttpSession();
+            request.setSession(session);
+            var response = account.preferences(request);
+            assertThat(response.getStatusCode().value()).isEqualTo(status >= 500 ? 503 : status);
+            assertThat(new String(response.getBody(), StandardCharsets.UTF_8)).doesNotContain("database secret details");
+            if (status < 500) assertThat(new String(response.getBody(), StandardCharsets.UTF_8)).contains("INVALID_PROFILE_LINK");
+            assertThat(session.isInvalid()).isFalse();
+        }
+    }
+
+    @Test void oversizedOrForeignPreferenceAndLinkRequestsNeverReachIdentity() throws Exception {
+        for (String path : new String[]{"/api/v1/account/preferences", "/api/v1/account/links"}) {
+            var large = request("POST", path);
+            large.setContent(new byte[AccountProxyController.MAX_ACCOUNT_BYTES + 1]);
+            assertThat(account.preferences(large).getStatusCode().value()).isEqualTo(413);
+            var foreign = request("POST", path);
+            foreign.addHeader("Origin", "https://untrusted.example");
+            assertThat(account.preferences(foreign).getStatusCode().value()).isEqualTo(403);
+        }
+    }
+
     @Test void oversizedPasswordBodyRejectedBeforeUpstreamAndSessionPreserved() throws Exception {
         var request = request("POST", "/api/v1/account/password");
         var session = new MockHttpSession();

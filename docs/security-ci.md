@@ -67,3 +67,17 @@ After the user-owned Git cycle and a real hosted run, configure an **active** br
 The October 2026 local audit reproduced and fixed the incomplete-SARIF acceptance gap with failure fixtures. Local parser tests do not prove hosted CodeQL execution or branch protection. Those settings, public run results and a real rejected failing PR remain unverified until authorized publication.
 
 References: [required check events and skipped workflows](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks), [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
+
+## Source-bound exception maintenance
+
+If the security helper suite reports `SAST exception source changed or is missing`,
+review the complete diff of each affected source and rerun its authentication,
+CSRF and proxy regression tests before updating `sourceSha256`. Do not refresh
+hashes automatically or extend expiry to make CI pass. On 2026-10-12 the Blaze/admin
+return routes and review/staff proxy additions were re-reviewed; both existing
+exceptions retain their exact rule/file scope and 2026-10-19 expiry.
+
+The helper suite deliberately emits warning/error notification summaries from
+negative fixtures. Its unittest result determines whether those fixtures passed;
+these summaries are not themselves evidence of a failed hosted CodeQL analysis.
+A new hosted full analysis remains required after publishing an exception update.

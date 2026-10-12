@@ -85,8 +85,9 @@ public class GatewayConfiguration {
                     || path.matches(".*(?:^|/)\\.{1,2}(?:/.*|$)")
                     || unsafeRedirectCharacters(path) || unsafeRedirectCharacters(destination.getQuery())
                     || unsafeRedirectCharacters(destination.getFragment())) return "/";
+            // DLV-931: the catalog route is /blaze; /look-ahead stays accepted for old bookmarks and open tabs.
             return path.equals("/") || path.equals("/account") || path.equals("/delivery-plan")
-                    || path.matches("^/(?:study-plan|learn|grow|look-ahead|search|support|author)(?:/.*)?$")
+                    || path.matches("^/(?:study-plan|learn|grow|blaze|look-ahead|search|support|author|admin)(?:/.*)?$")
                     ? value : "/";
         } catch (java.net.URISyntaxException invalidDestination) {
             return "/";

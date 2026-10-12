@@ -338,3 +338,44 @@ activation; private content and AWS credentials are never bundled in the image.
 Publication explicitly pushes only the verified `linux/amd64` manifest (Docker API
 1.46 or newer). The registry receipt checks its config digest against the saved
 archive; Docker Desktop index IDs are kept separate from that config identity.
+
+## Platform reviews relay (DLV-928)
+
+The proxy allows only the exact `/bff/api/v1/platform-reviews` routes (canonical lowercase
+UUIDs) and accepts `PUT` for these routes only; other routes keep GET/POST/DELETE. Writes
+reject query strings. Upload bodies are relayed unparsed and bounded to 21 MiB
+(`spring.servlet.multipart.enabled=false`, so the Gateway never parses multipart); Domain
+enforces the image rules. `GatewayConfiguration.safeReturn` now accepts `/admin` paths, so
+sign-in returns to admin pages directly. Tests: `PlatformReviewGatewayTest`,
+`GatewayReturnDestinationTest`.
+
+## Blaze catalog route (DLV-931)
+
+The catalog route is now `/blaze`. `GatewayConfiguration.safeReturn` accepts `/blaze` and
+`/blaze/...` as sign-in return destinations and keeps `/look-ahead/...` for old bookmarks and
+open tabs; the web app owns any redirect from the old route. `/content/**` is relayed
+unchanged, so `/content/blaze/...` needs no Gateway change. Test: `GatewayReturnDestinationTest`.
+
+## Account theme and profile links (DLV-932)
+
+In Local mode the Identity proxy also relays `POST /api/v1/account/preferences`
+(theme) and `POST /api/v1/account/links` (GitHub, LinkedIn, X and website links)
+exactly like `POST /api/v1/account/profile`: they are in the Identity proxy
+security chain, so Identity checks its own session and CSRF token; only the
+Identity cookies, `Content-Type`, `Accept` and `X-CSRF-TOKEN` are forwarded;
+bodies are capped at 8 KiB; Identity 4xx responses are kept and 5xx responses
+become a sanitized 503. Other methods are rejected. Identity owns validation
+and the response shape (see the Identity README). Cloud mode (`dev`/`prod`) does
+not serve these two routes yet. Tests: `AccountProxyControllerTest`,
+`IdentityProxyServletIntegrationTest`.
+
+
+## Staff access and cloud account preferences (DLV-930/933)
+
+The exact `/bff/api/v1/admin/access` GET/POST, `/catalog` GET, `/lookup` POST and
+`/bff/api/v1/account/permissions` GET paths proxy to Domain with server-held
+tokens; role checks remain Domain-owned. Writes require Gateway CSRF and bounded
+request bodies. Identity's internal account directory is never publicly proxied.
+In DEV/PROD, `/api/v1/account/preferences` and `/api/v1/account/links` now select
+CloudAccountController and Domain persistence, retaining Local request shapes.
+Cloud services remain unprovisioned; no live AWS verification is claimed.
