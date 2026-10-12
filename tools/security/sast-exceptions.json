@@ -4,18 +4,18 @@
     {
       "ruleId": "java/spring-disabled-csrf-protection",
       "file": "src/main/java/com/lookahead/learning/content/gateway/GatewayConfiguration.java",
-      "sourceSha256": "9353d65f534a465e73b232d41d47e739073cbf32a8f19631e841ad873ae26771",
+      "sourceSha256": "cc95ea56cfd299c2f3741c08e07a60c9e026dfec3da562397f6f6fdee2ba5d01",
       "expiresAt": "2026-10-19",
       "ticket": "DLV-804",
-      "rationale": "This narrow pass-through chain does not authenticate or mutate state itself; it forwards the browser session and CSRF token to Identity, which validates both. The gateway's own authenticated BFF chain retains CSRF protection."
+      "rationale": "This narrow pass-through chain does not authenticate or mutate state itself; it forwards the browser session and CSRF token to Identity, which validates both. The gateway's own authenticated BFF chain retains CSRF protection. Re-reviewed 2026-10-12: the source changes add same-origin Blaze/admin return paths; the local Identity pass-through chain and authenticated BFF CSRF enforcement are unchanged."
     },
     {
       "ruleId": "java/user-controlled-bypass",
       "file": "src/main/java/com/lookahead/learning/content/gateway/GatewayController.java",
-      "sourceSha256": "9d04b0f778ac3d1018a44d3c24310b2e76ddcd8eafbceffbdf029e6033d18b4a",
+      "sourceSha256": "95467f44e593d18226647b6dd34d5f72bb68a75c3ebff5244ef144f03c3983a4",
       "expiresAt": "2026-10-19",
       "ticket": "DLV-918",
-      "rationale": "The browser reauthenticate=true parameter terminates session reuse by starting a fresh OAuth authorization flow; it never grants access or creates authentication. Reuse otherwise requires an OAuth2AuthenticationToken from the server security context, its stored authorized client, and Domain auth/me HTTP 200 using that client bearer and Gateway sign-in proof. Anonymous, missing-client and Domain-rejected sessions start OAuth. CloudGatewaySecurityIntegrationTest verifies these boundaries. Reviewed against the reported completed full scan; exact whole-source binding and expiry apply."
+      "rationale": "The browser reauthenticate=true parameter terminates session reuse by starting a fresh OAuth authorization flow; it never grants access or creates authentication. Reuse otherwise requires an OAuth2AuthenticationToken from the server security context, its stored authorized client, and Domain auth/me HTTP 200 using that client bearer and Gateway sign-in proof. Anonymous, missing-client and Domain-rejected sessions start OAuth. CloudGatewaySecurityIntegrationTest verifies these boundaries. Reviewed against the reported completed full scan; exact whole-source binding and expiry apply. Re-reviewed 2026-10-12: added review/staff proxy routes require server OAuth authentication and retain BFF CSRF, bounded bodies and fixed Domain upstream; the login reuse and forced-reauthentication logic is unchanged. Fresh hosted CodeQL analysis is still required."
     }
   ]
 }
