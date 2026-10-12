@@ -44,6 +44,12 @@ public class AccountProxyController {
         return forward(request);
     }
 
+    /** DLV-932: theme preference and public profile links; Identity validates session, CSRF and body. */
+    @PostMapping({"/api/v1/account/preferences", "/api/v1/account/links"})
+    public ResponseEntity<byte[]> preferences(HttpServletRequest request) throws IOException {
+        return forward(request);
+    }
+
     @PostMapping("/api/v1/account/password")
     public ResponseEntity<byte[]> password(HttpServletRequest request) throws IOException {
         var response = forward(request);

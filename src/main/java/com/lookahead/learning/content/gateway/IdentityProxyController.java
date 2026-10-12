@@ -17,7 +17,8 @@ import java.util.Set;
 public class IdentityProxyController {
     public static final String[] PATHS = {"/api/v1/auth/options", "/api/v1/auth/csrf",
             "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/continue", "/api/v1/auth/logout",
-            "/api/v1/account/profile", "/api/v1/account/password",
+            "/api/v1/account/profile", "/api/v1/account/preferences", "/api/v1/account/links",
+            "/api/v1/account/password",
             "/api/v1/account/sign-ins", "/api/v1/account/sign-ins/revoke",
             "/api/v1/account/sign-ins/revoke-others", "/api/v1/account/sign-ins/label",
             "/api/v1/auth/sign-in-challenge", "/api/v1/auth/sign-in-challenge/replace",
