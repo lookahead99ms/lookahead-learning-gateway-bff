@@ -59,7 +59,26 @@ public class GatewayClientConfiguration {
         factory.setReadTimeout(properties.readTimeout());
         return factory;
     }
-    @Bean RestClient gatewayHttp(OAuthProperties properties) { return RestClient.builder().requestFactory(boundedRequests(properties)).build(); }
+    RestClient gatewayHttp(OAuthProperties properties) { return RestClient.builder().requestFactory(boundedRequests(properties)).build(); }
+    @Bean RestClient gatewayHttp(OAuthProperties properties, org.springframework.core.env.Environment environment,
+            org.springframework.beans.factory.ObjectProvider<org.springframework.boot.ssl.SslBundles> bundles) {
+        var publicRequests = boundedRequests(properties);
+        if (!environment.acceptsProfiles(org.springframework.core.env.Profiles.of("lower-cost-dev")))
+            return RestClient.builder().requestFactory(publicRequests).build();
+        var client = java.net.http.HttpClient.newBuilder().connectTimeout(properties.connectTimeout())
+                .sslContext(bundles.getObject().getBundle("internal").createSslContext())
+                .followRedirects(java.net.http.HttpClient.Redirect.NEVER).build();
+        var internalRequests = new JdkClientHttpRequestFactory(client);
+        internalRequests.setReadTimeout(properties.readTimeout());
+        var origins = com.lookahead.learning.content.oauth.DevServiceOrigins.forSlot(environment.getProperty("LOOKAHEAD_RELEASE_SLOT"));
+        // Never send the internal client certificate to Cognito, another slot or other public providers.
+        return RestClient.builder().requestFactory((uri, method) -> {
+            boolean internal = origins.internal(uri);
+            if (internal && (!"https".equals(uri.getScheme()) || uri.getPort() != 8443))
+                throw new IllegalArgumentException("Exact internal HTTPS origin required");
+            return (internal ? internalRequests : publicRequests).createRequest(uri, method);
+        }).build();
+    }
     private static RestClient tokenHttp(OAuthProperties properties) {
         return RestClient.builder().requestFactory(boundedRequests(properties)).configureMessageConverters(converters->{
             converters.addCustomConverter(new FormHttpMessageConverter());

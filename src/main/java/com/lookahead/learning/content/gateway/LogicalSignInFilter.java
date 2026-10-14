@@ -71,9 +71,7 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
             return;
         }
         if (status == 401) {
-            var session = request.getSession(false);
-            if (session != null) session.invalidate();
-            SecurityContextHolder.clearContext();
+            DevAdmission.clearLearner(request);
         }
         response.setStatus(status == 401 ? 401 : 503);
         response.setHeader("Cache-Control", "no-store");

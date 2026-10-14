@@ -379,3 +379,36 @@ request bodies. Identity's internal account directory is never publicly proxied.
 In DEV/PROD, `/api/v1/account/preferences` and `/api/v1/account/links` now select
 CloudAccountController and Domain persistence, retaining Local request shapes.
 Cloud services remain unprovisioned; no live AWS verification is claimed.
+
+### Lower-cost DEV candidate
+
+The `lower-cost-dev` profile adds Gateway-owned DEV admission and public TLS,
+internal mTLS to Web/Domain, process-local admission/learner sessions and the
+`/dev/session`, `/dev/csrf`, `/dev/leave` workflow. Admission lasts at most8 hours;
+learner inactivity expires after30 minutes. Status polling does not keep learner
+sessions alive. Leave DEV attempts learner sign-out, clears both local states even
+if the upstream is unavailable, then chains both fixed provider logout redirects.
+A failed remote operation is not reported as confirmed revocation.
+
+Credentials are startup-fetched exact versions mounted under `/run/credentials`;
+public provider trust and internal client identity remain separate. This profile
+is DEV-only and is not a replacement for the ordinary local configuration.
+It is locally implemented, not deployed. Infra owns the candidate templates,
+finite runtime jobs and `docs/deployment/lower-cost-dev-session-runbook.md`.
+Provider login, negative AWS reachability and complete cutover tests remain pending.
+
+### Isolated DEV release slots
+
+The lower-cost DEV profile requires `LOOKAHEAD_RELEASE_SLOT=blue|green`.
+Gateway verifies and connects only to that slot's Web/Domain private DNS origins
+(`web-{slot}.lookahead-dev.internal`, `domain-{slot}.lookahead-dev.internal`, TLS
+8443). `LOOKAHEAD_DOMAIN_UPSTREAM` must agree with the selected slot. The client
+certificate is restricted to these internal destinations; public OAuth connections
+use the public trust context. A slot change loses in-memory sessions and requires
+sign-in again. See Infra's `docs/deployment/lower-cost-dev-release-slots.md` for
+candidate gates, guarded cutover and operator-approved rollback.
+
+Lower-cost DEV security events use the dedicated `lookahead.security.audit` logger
+with fixed outcome names and random event IDs. The filter preserves HTTP responses
+and emits no request paths, tokens or bodies. Infra owns the separately scoped
+audit relay and90-day archive; local tests do not verify AWS delivery.

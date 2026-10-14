@@ -1,0 +1,41 @@
+# Explicit DEV-only application TLS; the ordinary local profile is unchanged.
+spring:
+  config:
+    import: configtree:/run/credentials/
+  ssl:
+    bundle:
+      pem:
+        serving:
+          keystore:
+            certificate: file:/run/credentials/server.crt
+            private-key: file:/run/credentials/server.key
+        internal:
+          keystore:
+            certificate: file:/run/credentials/client.crt
+            private-key: file:/run/credentials/client.key
+          truststore:
+            certificate: file:/run/credentials/trust.pem
+server:
+  address: 0.0.0.0
+  port: 8443
+  ssl:
+    enabled: true
+    bundle: serving
+    enabled-protocols: TLSv1.3,TLSv1.2
+management:
+  server:
+    port: 8081
+    address: 127.0.0.1
+    ssl:
+      enabled: false
+app:
+  oauth:
+    domain-transport: application-mtls
+    domain-api-upstream: ${LOOKAHEAD_DOMAIN_UPSTREAM}
+  admission:
+    region: ${AWS_REGION}
+    pool-id: ${LOOKAHEAD_ADMISSION_POOL_ID}
+    managed-login: ${LOOKAHEAD_ADMISSION_MANAGED_LOGIN}
+    client-id: ${LOOKAHEAD_ADMISSION_CLIENT_ID}
+  dev-session:
+    table: ${LOOKAHEAD_DEV_STATE_TABLE}

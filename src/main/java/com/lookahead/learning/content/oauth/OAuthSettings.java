@@ -18,7 +18,7 @@ public record OAuthSettings(String issuer, String clientId, String clientSecret,
         if (!Set.of("local", "dev", "prod").contains(mode))
             throw new IllegalStateException("Explicit local, dev or prod deployment environment required");
         String domainTransport = environment.getProperty("app.oauth.domain-transport", "https");
-        if (!Set.of("https", "service-connect-tls").contains(domainTransport))
+        if (!Set.of("https", "service-connect-tls", "application-mtls").contains(domainTransport))
             throw new IllegalStateException("Explicit supported Domain transport required");
         if ("local".equals(mode) && !"https".equals(domainTransport))
             throw new IllegalStateException("Service Connect transport requires DEV/PROD");
@@ -46,7 +46,13 @@ public record OAuthSettings(String issuer, String clientId, String clientSecret,
             if(!client.matches("[A-Za-z0-9]{10,128}")||!injectedSecret(secret))throw new IllegalStateException("Invalid Cognito client credentials");
             origin(required(properties.frontend()),false,false);
             String domain = required(properties.domainApiUpstream());
-            if ("service-connect-tls".equals(domainTransport)) {
+            if ("application-mtls".equals(domainTransport)) {
+                if (!"dev".equals(mode) || !environment.acceptsProfiles(org.springframework.core.env.Profiles.of("lower-cost-dev"))
+                        || !DevServiceOrigins.forSlot(environment.getProperty("LOOKAHEAD_RELEASE_SLOT")).domain().equals(domain)
+                        || !environment.getProperty("server.ssl.enabled", Boolean.class, false)
+                        || !"serving".equals(environment.getProperty("server.ssl.bundle")))
+                    throw new IllegalStateException("Application mTLS requires the explicit DEV TLS profile and exact Domain origin");
+            } else if ("service-connect-tls".equals(domainTransport)) {
                 // The selected ECS client alias routes through its local Service Connect proxy.
                 // Infra must require TLS for the inter-task hop; this is not a general HTTP exception.
                 if (!"http://domain:8080".equals(domain))
