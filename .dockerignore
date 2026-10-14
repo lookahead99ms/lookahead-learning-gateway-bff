@@ -12,6 +12,11 @@
 !src/
 !src/**
 
+# Exact public JVM DNS cache configuration required by the runtime COPY.
+!deployment/
+!deployment/container/
+!deployment/container/dns.security
+
 # Do not admit accidental credentials or generated/private files under src/.
 **/.env*
 **/*.pem

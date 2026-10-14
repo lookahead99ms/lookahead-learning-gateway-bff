@@ -4,18 +4,18 @@
     {
       "ruleId": "java/spring-disabled-csrf-protection",
       "file": "src/main/java/com/lookahead/learning/content/gateway/GatewayConfiguration.java",
-      "sourceSha256": "cc95ea56cfd299c2f3741c08e07a60c9e026dfec3da562397f6f6fdee2ba5d01",
+      "sourceSha256": "4501cbb8405fa06c424dcbf7eea85779fab717f70f51dfd409afd9210db39979",
       "expiresAt": "2026-10-19",
       "ticket": "DLV-804",
-      "rationale": "This narrow pass-through chain does not authenticate or mutate state itself; it forwards the browser session and CSRF token to Identity, which validates both. The gateway's own authenticated BFF chain retains CSRF protection. Re-reviewed 2026-10-12: the source changes add same-origin Blaze/admin return paths; the local Identity pass-through chain and authenticated BFF CSRF enforcement are unchanged."
+      "rationale": "This narrow pass-through chain does not authenticate or mutate state itself; it forwards the browser session and CSRF token to Identity, which validates both. The gateway's own authenticated BFF chain retains CSRF protection. Re-reviewed 2026-10-12: the source changes add same-origin Blaze/admin return paths; the local Identity pass-through chain and authenticated BFF CSRF enforcement are unchanged. Re-reviewed 2026-10-14 for DLV-810: Identity pass-through remains local-only and unchanged; BFF session CSRF remains enabled. Lower-cost DEV adds idle filtering and GET/HEAD-only safe static routes behind the separate fail-closed admission filter; authenticated API matchers still precede fallback. Exception remains limited to the existing local pass-through rule; no expiry extension. Fresh hosted CodeQL remains required."
     },
     {
       "ruleId": "java/user-controlled-bypass",
       "file": "src/main/java/com/lookahead/learning/content/gateway/GatewayController.java",
-      "sourceSha256": "95467f44e593d18226647b6dd34d5f72bb68a75c3ebff5244ef144f03c3983a4",
+      "sourceSha256": "98690c6ea144dc81b72b27845334b03cbdcf58e838c90610803d94c25c2bcbaa",
       "expiresAt": "2026-10-19",
       "ticket": "DLV-918",
-      "rationale": "The browser reauthenticate=true parameter terminates session reuse by starting a fresh OAuth authorization flow; it never grants access or creates authentication. Reuse otherwise requires an OAuth2AuthenticationToken from the server security context, its stored authorized client, and Domain auth/me HTTP 200 using that client bearer and Gateway sign-in proof. Anonymous, missing-client and Domain-rejected sessions start OAuth. CloudGatewaySecurityIntegrationTest verifies these boundaries. Reviewed against the reported completed full scan; exact whole-source binding and expiry apply. Re-reviewed 2026-10-12: added review/staff proxy routes require server OAuth authentication and retain BFF CSRF, bounded bodies and fixed Domain upstream; the login reuse and forced-reauthentication logic is unchanged. Fresh hosted CodeQL analysis is still required."
+      "rationale": "The browser reauthenticate=true parameter terminates session reuse by starting a fresh OAuth authorization flow; it never grants access or creates authentication. Reuse otherwise requires an OAuth2AuthenticationToken from the server security context, its stored authorized client, and Domain auth/me HTTP 200 using that client bearer and Gateway sign-in proof. Anonymous, missing-client and Domain-rejected sessions start OAuth. CloudGatewaySecurityIntegrationTest verifies these boundaries. Reviewed against the reported completed full scan; exact whole-source binding and expiry apply. Re-reviewed 2026-10-12: added review/staff proxy routes require server OAuth authentication and retain BFF CSRF, bounded bodies and fixed Domain upstream; the login reuse and forced-reauthentication logic is unchanged. Fresh hosted CodeQL analysis is still required. Re-reviewed 2026-10-14 for DLV-810: login/reuse/reauthenticate logic is unchanged. Logout now calls clearLearner, which invalidates the old session and clears SecurityContext, preserving only typed DEV admission state in a new session; admission is not learner authentication. Existing cloud login boundary and DEV logout tests remain required. No rule/path expansion or expiry extension; fresh hosted CodeQL remains required."
     }
   ]
 }
