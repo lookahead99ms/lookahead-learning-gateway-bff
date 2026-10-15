@@ -107,7 +107,7 @@ class GatewaySecurityIntegrationTest {
     static class MutationProbe {
         final AtomicInteger acceptedWrites = new AtomicInteger();
 
-        @PostMapping({"/bff/api/v1/plans", "/bff/api/v1/author/review-artifacts/dlv-704/events"})
+        @PostMapping({"/bff/api/v1/auth/invitations/activate", "/bff/api/v1/plans", "/bff/api/v1/author/review-artifacts/dlv-704/events"})
         String mutate(OAuth2AuthenticationToken authentication) {
             assertThat(authentication.isAuthenticated()).isTrue();
             acceptedWrites.incrementAndGet();
@@ -195,6 +195,22 @@ class GatewaySecurityIntegrationTest {
         var session = new MockHttpSession(context.getServletContext());
         var otherSession = new MockHttpSession(context.getServletContext());
         String path = "/bff/api/v1/author/review-artifacts/dlv-704/events";
+        String own = mapper.readTree(http.perform(get("/bff/api/v1/auth/csrf").session(session)
+                .with(oauth2Login().clientRegistration(registration))).andReturn().getResponse().getContentAsString()).path("data").path("token").asText();
+        String other = mapper.readTree(http.perform(get("/bff/api/v1/auth/csrf").session(otherSession)
+                .with(oauth2Login().clientRegistration(registration))).andReturn().getResponse().getContentAsString()).path("data").path("token").asText();
+        http.perform(post(path).session(session).with(oauth2Login().clientRegistration(registration))).andExpect(status().isForbidden());
+        http.perform(post(path).session(session).with(oauth2Login().clientRegistration(registration)).header("X-CSRF-TOKEN", other)).andExpect(status().isForbidden());
+        http.perform(post(path).session(session).with(oauth2Login().clientRegistration(registration)).header("X-CSRF-TOKEN", own)).andExpect(status().isOk());
+    }
+
+    @Test void invitationActivationRequiresSessionAndSessionBoundCsrf() throws Exception {
+        assertThat(request("GET", "/bff/api/v1/auth/invitations/activate").statusCode()).isEqualTo(401);
+        var http = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        var registration = context.getBean(ClientRegistrationRepository.class).findByRegistrationId("lookahead");
+        var session = new MockHttpSession(context.getServletContext());
+        var otherSession = new MockHttpSession(context.getServletContext());
+        String path = "/bff/api/v1/auth/invitations/activate";
         String own = mapper.readTree(http.perform(get("/bff/api/v1/auth/csrf").session(session)
                 .with(oauth2Login().clientRegistration(registration))).andReturn().getResponse().getContentAsString()).path("data").path("token").asText();
         String other = mapper.readTree(http.perform(get("/bff/api/v1/auth/csrf").session(otherSession)

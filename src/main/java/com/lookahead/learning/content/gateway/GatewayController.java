@@ -115,7 +115,7 @@ public class GatewayController {
         boolean account=upstreamPath.equals("/api/v1/auth/me") || upstreamPath.equals("/api/v1/account-catalog")
                 || upstreamPath.equals("/api/v1/support") || upstreamPath.equals("/api/v1/plans") || upstreamPath.startsWith("/api/v1/plans/");
         boolean staffAccess = ("GET".equals(request.getMethod()) && java.util.Set.of("/api/v1/account/permissions", "/api/v1/admin/access", "/api/v1/admin/access/catalog").contains(upstreamPath)
-                || "POST".equals(request.getMethod()) && java.util.Set.of("/api/v1/admin/access", "/api/v1/admin/access/lookup").contains(upstreamPath)) && request.getQueryString()==null;
+                || "POST".equals(request.getMethod()) && java.util.Set.of("/api/v1/admin/access", "/api/v1/admin/access/lookup", "/api/v1/auth/invitations/activate").contains(upstreamPath)) && request.getQueryString()==null;
         boolean execution = executionRoute(request.getMethod(), upstreamPath) && request.getQueryString() == null;
         boolean authorReview = authorReviewRoute(request.getMethod(), upstreamPath)
                 && (!"POST".equals(request.getMethod()) || request.getQueryString() == null);
