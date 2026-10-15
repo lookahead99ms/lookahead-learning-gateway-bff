@@ -63,6 +63,7 @@ public class GatewayConfiguration {
                 .logout(AbstractHttpConfigurer::disable).requestCache(AbstractHttpConfigurer::disable)
                 .sessionManagement(session->session.sessionFixation(fixation->fixation.changeSessionId()))
                 .authorizeHttpRequests(auth->auth
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,"/bff/api/v1/membership/plans","/bff/api/v1/sales/active").permitAll()
                         .requestMatchers("/bff/login","/bff/logout/complete","/bff/api/v1/auth/csrf","/oauth2/authorization/**","/login/oauth2/code/**","/content/**","/actuator/health","/actuator/health/**","/api/v1/auth/options","/api/v1/auth/csrf").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/bff/author/previews/**").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.HEAD, "/bff/author/previews/**").authenticated()
@@ -92,7 +93,7 @@ public class GatewayConfiguration {
                     || unsafeRedirectCharacters(path) || unsafeRedirectCharacters(destination.getQuery())
                     || unsafeRedirectCharacters(destination.getFragment())) return "/";
             // DLV-931: the catalog route is /blaze; /look-ahead stays accepted for old bookmarks and open tabs.
-            return path.equals("/") || path.equals("/account") || path.equals("/delivery-plan")
+            return path.equals("/") || path.equals("/account") || path.equals("/pricing") || path.equals("/delivery-plan")
                     || path.matches("^/(?:study-plan|learn|grow|blaze|look-ahead|search|support|author|admin)(?:/.*)?$")
                     ? value : "/";
         } catch (java.net.URISyntaxException invalidDestination) {

@@ -15,7 +15,7 @@ class GatewayReturnDestinationTest {
             "/study-plan", "/study-plan/saved?id=example#details", "/learn/java", "/grow#courses",
             "/blaze", "/blaze/system-design", "/blaze/system-design/module/caching#notes",
             "/look-ahead", "/look-ahead/system-design", "/search?q=java%20spring", "/support", "/author/architecture",
-            "/delivery-plan", "/delivery-plan?view=roadmap", "/admin", "/admin/reviews", "/admin/docs#start-here"})
+            "/pricing", "/delivery-plan", "/delivery-plan?view=roadmap", "/admin", "/admin/reviews", "/admin/docs#start-here"})
     void preservesRecognizedInternalDestinations(String destination) {
         assertThat(GatewayConfiguration.safeReturn(destination)).isEqualTo(destination);
     }

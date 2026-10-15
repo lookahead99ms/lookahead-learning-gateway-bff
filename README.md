@@ -429,3 +429,7 @@ claim event. Conflicting existing assignments return 409. The flow does not chan
 the sign-in return URL or enable first-time cloud admission. Local signup still
 cannot prove mailbox ownership. Deploy Domain and Gateway before the updated Web
 client; do not use the old mutating GET as fallback if POST fails.
+
+## Membership routing (DLV-209)
+
+Public GET `/bff/api/v1/membership/plans` and `/bff/api/v1/sales/active` forward to Domain. Account access-records, purchase lookup and POST purchase/quote routes require the BFF session; every write also requires its session-bound CSRF token. Forward `Idempotency-Key` unchanged on purchases/staff upgrades. Domain enforces account ownership and staff permissions. Saved study-plan routes are unchanged. Exact `/pricing` is an allowed login return destination. Local payments are simulated; no Stripe calls originate here. Run `./gradlew test` for route and session-CSRF checks.
