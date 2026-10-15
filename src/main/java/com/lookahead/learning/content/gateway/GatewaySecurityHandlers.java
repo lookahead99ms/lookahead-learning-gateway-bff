@@ -31,6 +31,7 @@ public class GatewaySecurityHandlers {
     void loginSucceeded(HttpServletRequest request, HttpServletResponse response,
                         Authentication authentication) throws IOException {
         var session = request.getSession();
+        session.setAttribute(LearnerIdleFilter.LAST_ACTIVITY, java.time.Instant.now());
         if(settings.cloud()) {
             try {
                 var client=clients.<org.springframework.security.oauth2.client.OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",authentication,request);

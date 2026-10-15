@@ -68,7 +68,7 @@ public class GatewayController {
         }
         String idToken=authentication.getPrincipal() instanceof OidcUser user?user.getIdToken().getTokenValue():null;
         clients.removeAuthorizedClient("lookahead",authentication,request,response);
-        var session=request.getSession(false);if(session!=null)session.invalidate();SecurityContextHolder.clearContext();
+        DevAdmission.clearLearner(request);
         String url=settings.issuer()+"/connect/logout?post_logout_redirect_uri="+encode(settings.frontend()+"/sign-in");
         if(idToken!=null)url+="&id_token_hint="+encode(idToken);
         response.setHeader("Cache-Control","no-store");return ApiResponse.success(Map.of("logoutUrl",url));
@@ -89,7 +89,7 @@ public class GatewayController {
             }
         }
         clients.removeAuthorizedClient("lookahead",authentication,request,response);
-        var session=request.getSession(false);if(session!=null)session.invalidate();SecurityContextHolder.clearContext();
+        DevAdmission.clearLearner(request);
         response.setHeader("Cache-Control","no-store");
         return ApiResponse.success(Map.of("logoutUrl",settings.frontend()+"/bff/logout/complete","providerRevocationConfirmed",Boolean.toString(providerConfirmed)));
     }

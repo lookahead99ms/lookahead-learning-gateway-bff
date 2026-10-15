@@ -45,9 +45,12 @@ public class GatewayConfiguration {
                                               GatewaySecurityHandlers handlers,
                                               org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager manager,
                                               org.springframework.web.client.RestClient gatewayHttp,
-                                              com.lookahead.learning.content.oauth.OAuthSettings settings) throws Exception {
+                                              com.lookahead.learning.content.oauth.OAuthSettings settings,
+                                              org.springframework.core.env.Environment environment) throws Exception {
         http.addFilterAfter(new LogicalSignInFilter(manager, gatewayHttp, settings),
                 org.springframework.security.web.context.SecurityContextHolderFilter.class);
+        if (environment.acceptsProfiles(org.springframework.core.env.Profiles.of("lower-cost-dev")))
+            http.addFilterBefore(new LearnerIdleFilter(java.time.Clock.systemUTC()), LogicalSignInFilter.class);
         var resolver=new DefaultOAuth2AuthorizationRequestResolver(clients,"/oauth2/authorization");
         resolver.setAuthorizationRequestCustomizer(builder->{
             OAuth2AuthorizationRequestCustomizers.withPkce().accept(builder);
@@ -63,7 +66,10 @@ public class GatewayConfiguration {
                         .requestMatchers("/bff/login","/bff/logout/complete","/bff/api/v1/auth/csrf","/oauth2/authorization/**","/login/oauth2/code/**","/content/**","/actuator/health","/actuator/health/**","/api/v1/auth/options","/api/v1/auth/csrf").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/bff/author/previews/**").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.HEAD, "/bff/author/previews/**").authenticated()
-                        .requestMatchers("/bff/api/v1/**","/api/v1/account/**","/api/v1/auth/sign-in-challenge/**").authenticated().anyRequest().denyAll())
+                        .requestMatchers("/bff/api/v1/**","/api/v1/account/**","/api/v1/auth/sign-in-challenge/**").authenticated().anyRequest().access((authentication, context) -> new org.springframework.security.authorization.AuthorizationDecision(
+                            environment.acceptsProfiles(org.springframework.core.env.Profiles.of("lower-cost-dev"))
+                            && java.util.Set.of("GET", "HEAD").contains(context.getRequest().getMethod())
+                            && DevWebProxy.safePath(context.getRequest().getRequestURI()))))
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint(handlers::authenticationRequired)
                         .accessDeniedHandler(handlers::accessDenied))
