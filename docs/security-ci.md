@@ -81,3 +81,11 @@ The helper suite deliberately emits warning/error notification summaries from
 negative fixtures. Its unittest result determines whether those fixtures passed;
 these summaries are not themselves evidence of a failed hosted CodeQL analysis.
 A new hosted full analysis remains required after publishing an exception update.
+
+## DLV-961 source-binding review (October 16)
+
+DLV-961 review 2026-10-16: account directory GET, access-summary and test-account/reset routes require server OAuth authentication and server-owned bearer forwarding. BFF mutation CSRF remains enabled, query strings remain rejected for mutations, and login reuse/reauthentication logic is unchanged. Exact rule/file and expiry unchanged.
+
+The security helper regressions copy the real exception-bound sources and prove that
+subsequent edits still fail closed. A fresh hosted full CodeQL analysis remains
+required; passing local helpers alone does not certify the hosted security gate.
