@@ -21,6 +21,14 @@ class MembershipRoutesTest {
   assertThat(GatewayController.membershipRoute("GET","/api/v1/admin/accounts/not-an-id/access-summary")).isFalse();
   assertThat(GatewayController.membershipRoute("GET","/api/v1/admin/accounts/"+id+"/access-summary/extra")).isFalse();
  }
+ @Test void realAccountMaintenanceRoutesAreExactAndWriteOnly() {
+  String id="12345678-1234-1234-1234-123456789abc";
+  for(String action:java.util.List.of("downgrade","delete")) {
+   assertThat(GatewayController.membershipRoute("POST","/api/v1/admin/accounts/"+id+"/"+action)).isTrue();
+   assertThat(GatewayController.membershipRoute("GET","/api/v1/admin/accounts/"+id+"/"+action)).isFalse();
+   assertThat(GatewayController.membershipRoute("POST","/api/v1/admin/accounts/not-an-id/"+action)).isFalse();
+  }
+ }
  @Test void exactPublicAndWriteRoutes(){
   assertThat(GatewayController.membershipRoute("GET","/api/v1/membership/plans")).isTrue();
   assertThat(GatewayController.membershipRoute("GET","/api/v1/plans")).isFalse();

@@ -5,6 +5,10 @@ allowance, create, reset and delete routes from the browser to Domain API using
 the server-held bearer token. Mutations require the BFF CSRF token; internal
 Identity operator routes remain private. It runs on the working Local stack
 behind 4301 as of 2026-10-16; stable4300 remains separate.
+The follow-up account-maintenance source also allowlists exact owner-bound
+`POST /bff/api/v1/admin/accounts/{id}/downgrade` and `/delete` routes. Domain
+authorizes both; BFF requires the session and CSRF token. DEV provider-owned
+account deletion remains unavailable in Domain.
 
 Java 21 / Spring Boot Backend for Frontend (BFF) for the Angular application.
 It owns browser sessions, server-held

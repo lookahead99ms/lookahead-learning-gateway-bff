@@ -179,7 +179,7 @@ public class GatewayController {
                 || path.matches("/api/v1/account/purchases/"+uuid) || path.matches("/api/v1/admin/accounts/"+uuid+"/(access-records|access-summary)");
             case "POST" -> Set.of("/api/v1/account/purchases","/api/v1/account/purchases/quote","/api/v1/admin/sales","/api/v1/admin/test-accounts").contains(path)
                 || path.matches("/api/v1/admin/test-accounts/"+uuid+"/reset")
-                || path.matches("/api/v1/admin/accounts/"+uuid+"/plan-upgrades") || path.matches("/api/v1/admin/sales/"+uuid+"/stop")
+                || path.matches("/api/v1/admin/accounts/"+uuid+"/(plan-upgrades|downgrade|delete)") || path.matches("/api/v1/admin/sales/"+uuid+"/stop")
                 || path.matches("/api/v1/admin/membership/plans/[a-z-]{1,40}/price");
             case "DELETE" -> path.matches("/api/v1/admin/test-accounts/"+uuid);
             default -> false;
