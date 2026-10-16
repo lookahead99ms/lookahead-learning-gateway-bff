@@ -433,3 +433,11 @@ client; do not use the old mutating GET as fallback if POST fails.
 ## Membership routing (DLV-209)
 
 Public GET `/bff/api/v1/membership/plans` and `/bff/api/v1/sales/active` forward to Domain. Account access-records, purchase lookup and POST purchase/quote routes require the BFF session; every write also requires its session-bound CSRF token. Forward `Idempotency-Key` unchanged on purchases/staff upgrades. Domain enforces account ownership and staff permissions. Saved study-plan routes are unchanged. Exact `/pricing` is an allowed login return destination. Local payments are simulated; no Stripe calls originate here. Run `./gradlew test` for route and session-CSRF checks.
+
+
+DLV-961 source adds authenticated, read-only forwarding for
+`/bff/api/v1/account/access-summary` and
+`/bff/api/v1/admin/accounts/{id}/access-summary`. Domain derives the labels and
+checks owner/admin/co-author authority; the Gateway keeps its existing session
+boundary and exact UUID route allowlist. No test-account maintenance credentials
+or internal seed endpoints are forwarded. Runtime activation remains pending.
