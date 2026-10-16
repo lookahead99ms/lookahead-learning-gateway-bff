@@ -416,3 +416,32 @@ audit relay and90-day archive; local tests do not verify AWS delivery.
 The Docker context explicitly includes only `deployment/container/dns.security`
 from that configuration directory. Keep this exact allowance when changing the
 runtime COPY; credential/private-file exclusions remain in effect.
+
+
+DLV-930 invitation activation: `GET /api/v1/auth/me` does not claim staff access.
+Managed sign-in restoration first reads the account, then submits the bodyless
+`POST /bff/api/v1/auth/invitations/activate` with the session CSRF token, and loads
+current grants/plans from the returned account. Gateway forwards only POST without
+query parameters to Domain `/api/v1/auth/invitations/activate` using its server-held
+bearer. Domain requires account scope and uses only provider-verified principal
+email. No eligible invitation is a no-op; retries/concurrent claims append one
+claim event. Conflicting existing assignments return 409. The flow does not change
+the sign-in return URL or enable first-time cloud admission. Local signup still
+cannot prove mailbox ownership. Deploy Domain and Gateway before the updated Web
+client; do not use the old mutating GET as fallback if POST fails.
+
+## Membership routing (DLV-209)
+
+Public GET `/bff/api/v1/membership/plans` and `/bff/api/v1/sales/active` forward to Domain. Account access-records, purchase lookup and POST purchase/quote routes require the BFF session; every write also requires its session-bound CSRF token. Forward `Idempotency-Key` unchanged on purchases/staff upgrades. Domain enforces account ownership and staff permissions. Saved study-plan routes are unchanged. Exact `/pricing` is an allowed login return destination. Local payments are simulated; no Stripe calls originate here. Run `./gradlew test` for route and session-CSRF checks.
+
+
+DLV-961 source adds authenticated, read-only forwarding for
+`/bff/api/v1/account/access-summary` and
+`/bff/api/v1/admin/accounts/{id}/access-summary`. Domain derives the labels and
+checks owner/admin/co-author authority; the Gateway keeps its existing session
+boundary and exact UUID route allowlist. No test-account maintenance credentials
+or internal seed endpoints are forwarded. Runtime activation remains pending.
+
+## People account directory
+
+`GET /bff/api/v1/admin/accounts?query=&page=0` relays the owner directory with the Gateway session and server-held Domain bearer. Only GET is allowlisted; private Identity enumeration is not proxied. Domain enforces owner authorization; browser cookies and Authorization headers are never relayed.
