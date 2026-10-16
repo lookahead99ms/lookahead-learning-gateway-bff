@@ -54,4 +54,15 @@ class InvitationActivationGatewayTest {
         assertThat(controller.proxy(request,new MockHttpServletResponse(),authentication).getStatusCode().value()).isEqualTo(200);
         server.verify();
     }
+    @Test void directoryForwardsEncodedQueryOnlyOnAuthenticatedGet() throws Exception {
+        String path="/bff/api/v1/admin/accounts";
+        var request=request("GET",path);request.setQueryString("query=real%2Bname&page=2");
+        assertThat(controller.proxy(request,new MockHttpServletResponse(),null).getStatusCode().value()).isEqualTo(401);
+        for(String method:new String[]{"POST","DELETE"})assertThat(controller.proxy(request(method,path),new MockHttpServletResponse(),authentication).getStatusCode().value()).isEqualTo(404);
+        authorize();request.addHeader("Cookie","private=value");request.addHeader("Authorization","Bearer untrusted");
+        server.expect(requestTo("http://domain/api/v1/admin/accounts?query=real%2Bname&page=2"))
+            .andExpect(method(HttpMethod.GET)).andExpect(header("Authorization","Bearer server-token"))
+            .andExpect(headerDoesNotExist("Cookie")).andRespond(withSuccess("{\"data\":{\"accounts\":[],\"page\":2,\"hasNext\":false}}",MediaType.APPLICATION_JSON));
+        assertThat(controller.proxy(request,new MockHttpServletResponse(),authentication).getStatusCode().value()).isEqualTo(200);server.verify();
+    }
 }

@@ -116,6 +116,7 @@ public class GatewayController {
                 || upstreamPath.equals("/api/v1/support") || upstreamPath.equals("/api/v1/plans") || upstreamPath.startsWith("/api/v1/plans/");
         boolean staffAccess = ("GET".equals(request.getMethod()) && java.util.Set.of("/api/v1/account/permissions", "/api/v1/admin/access", "/api/v1/admin/access/catalog").contains(upstreamPath)
                 || "POST".equals(request.getMethod()) && java.util.Set.of("/api/v1/admin/access", "/api/v1/admin/access/lookup", "/api/v1/auth/invitations/activate").contains(upstreamPath)) && request.getQueryString()==null;
+        boolean directory = "GET".equals(request.getMethod()) && "/api/v1/admin/accounts".equals(upstreamPath);
         boolean membership = membershipRoute(request.getMethod(),upstreamPath) && request.getQueryString()==null;
         boolean execution = executionRoute(request.getMethod(), upstreamPath) && request.getQueryString() == null;
         boolean authorReview = authorReviewRoute(request.getMethod(), upstreamPath)
@@ -124,8 +125,8 @@ public class GatewayController {
                 && ("GET".equals(request.getMethod()) || request.getQueryString() == null);
         // PUT exists only for platform reviews; every other route keeps its earlier methods.
         if("PUT".equals(request.getMethod()) && !platformReview)return ResponseEntity.status(405).header(HttpHeaders.CACHE_CONTROL,"no-store").build();
-        if(!content && !account && !execution && !authorReview && !platformReview && !staffAccess && !membership)return ResponseEntity.notFound().build();
-        if ((authorReview || platformReview || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken)) return ResponseEntity.status(401).build();
+        if(!content && !account && !execution && !authorReview && !platformReview && !staffAccess && !membership && !directory)return ResponseEntity.notFound().build();
+        if ((directory || authorReview || platformReview || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken)) return ResponseEntity.status(401).build();
         int bodyLimit = (authorReview || staffAccess) ? 16 * 1024 : execution ? 512 * 1024 : platformReview ? PLATFORM_REVIEW_BODY_BYTES : 8 * 1024 * 1024;
         byte[] body=request.getInputStream().readNBytes(bodyLimit + 1);
         if(body.length>bodyLimit)return ResponseEntity.status(413).build();

@@ -441,3 +441,7 @@ DLV-961 source adds authenticated, read-only forwarding for
 checks owner/admin/co-author authority; the Gateway keeps its existing session
 boundary and exact UUID route allowlist. No test-account maintenance credentials
 or internal seed endpoints are forwarded. Runtime activation remains pending.
+
+## People account directory
+
+`GET /bff/api/v1/admin/accounts?query=&page=0` relays the owner directory with the Gateway session and server-held Domain bearer. Only GET is allowlisted; private Identity enumeration is not proxied. Domain enforces owner authorization; browser cookies and Authorization headers are never relayed.
