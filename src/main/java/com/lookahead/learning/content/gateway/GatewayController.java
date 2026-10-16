@@ -175,12 +175,13 @@ public class GatewayController {
     static boolean membershipRoute(String method,String path) {
         String uuid="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
         return switch(method) {
-            case "GET" -> Set.of("/api/v1/membership/plans","/api/v1/sales/active","/api/v1/account/access-records","/api/v1/account/access-summary","/api/v1/admin/test-accounts").contains(path)
+            case "GET" -> Set.of("/api/v1/membership/plans","/api/v1/sales/active","/api/v1/account/access-records","/api/v1/account/access-summary","/api/v1/admin/test-accounts","/api/v1/admin/test-accounts/allowance").contains(path)
                 || path.matches("/api/v1/account/purchases/"+uuid) || path.matches("/api/v1/admin/accounts/"+uuid+"/(access-records|access-summary)");
-            case "POST" -> Set.of("/api/v1/account/purchases","/api/v1/account/purchases/quote","/api/v1/admin/sales").contains(path)
+            case "POST" -> Set.of("/api/v1/account/purchases","/api/v1/account/purchases/quote","/api/v1/admin/sales","/api/v1/admin/test-accounts").contains(path)
                 || path.matches("/api/v1/admin/test-accounts/"+uuid+"/reset")
-                || path.matches("/api/v1/admin/accounts/"+uuid+"/plan-upgrades") || path.matches("/api/v1/admin/sales/"+uuid+"/stop")
+                || path.matches("/api/v1/admin/accounts/"+uuid+"/(plan-upgrades|downgrade|delete)") || path.matches("/api/v1/admin/sales/"+uuid+"/stop")
                 || path.matches("/api/v1/admin/membership/plans/[a-z-]{1,40}/price");
+            case "DELETE" -> path.matches("/api/v1/admin/test-accounts/"+uuid);
             default -> false;
         };
     }
