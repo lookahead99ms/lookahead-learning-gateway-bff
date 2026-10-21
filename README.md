@@ -467,3 +467,9 @@ to their exact revision, not claimed as a delta since the previous deployment.
 The central Content/Infra approval flows retain this snapshot with the approval
 receipt and disclose lookup failures or bounded/truncated results. Runtime APIs,
 workflow triggers, AWS grants and existing approval commands are unchanged.
+
+
+The Gateway's two source-bound SAST exceptions were re-reviewed on October 21,
+2026 and expire after October 28. See [security CI](docs/security-ci.md) for scope
+and verification requirements. Expiry, source changes and unmatched findings
+continue to block CI; renewal is never automatic.
