@@ -455,3 +455,15 @@ or internal seed endpoints are forwarded. Runtime activation remains pending.
 ## People account directory
 
 `GET /bff/api/v1/admin/accounts?query=&page=0` relays the owner directory with the Gateway session and server-held Domain bearer. Only GET is allowlisted; private Identity enumeration is not proxied. Domain enforces owner authorization; browser cookies and Authorization headers are never relayed.
+
+### Workflow run identification and approval context
+
+Actions run titles include the workflow name, branch, event and run number so
+parallel workflows are distinguishable in All workflows. Existing run history
+is unchanged. Approval issues, where produced, show exact source commit links
+and associated PRs merged into main. Push-triggered approvals include the
+verified push range when available; manual/pinned sources are explicitly scoped
+to their exact revision, not claimed as a delta since the previous deployment.
+The central Content/Infra approval flows retain this snapshot with the approval
+receipt and disclose lookup failures or bounded/truncated results. Runtime APIs,
+workflow triggers, AWS grants and existing approval commands are unchanged.
