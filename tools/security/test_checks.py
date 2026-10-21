@@ -1,5 +1,5 @@
 import copy
-from datetime import date
+from datetime import date, timedelta
 import importlib.util
 from pathlib import Path
 import unittest
@@ -117,6 +117,37 @@ class SecurityGateTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, '^SAST exception source changed or is missing$'):
                         checks.load_sast_exceptions(policyPath, root)
                     source.write_bytes(original)
+
+    def test_each_reviewed_exception_expires_after_its_last_valid_day(self):
+        policy = checks.json.loads(checks.SAST_EXCEPTIONS.read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'exceptions.json'
+            for entry in policy['exceptions']:
+                with self.subTest(rule=entry['ruleId']):
+                    path.write_text(checks.json.dumps({'version': 1, 'exceptions': [entry]}))
+                    expiry = date.fromisoformat(entry['expiresAt'])
+                    self.assertEqual(1, len(checks.load_sast_exceptions(path, today=expiry)))
+                    with self.assertRaisesRegex(ValueError, '^Expired SAST exception$'):
+                        checks.load_sast_exceptions(path, today=expiry + timedelta(days=1))
+
+    def test_original_expired_policy_still_blocks_at_review_date(self):
+        policy = checks.json.loads(checks.SAST_EXCEPTIONS.read_text())
+        for entry in policy['exceptions']:
+            entry['expiresAt'] = '2026-10-19'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'exceptions.json'
+            path.write_text(checks.json.dumps(policy))
+            with self.assertRaisesRegex(ValueError, '^Expired SAST exception$'):
+                checks.load_sast_exceptions(path, today=date(2026, 10, 21))
+
+    def test_runtime_base_preserves_the_unprivileged_java_contract(self):
+        dockerfile = (checks.ROOT / 'Dockerfile').read_text()
+        self.assertEqual('eclipse-temurin:21-jre-noble@sha256:35501d3f93173b420ac9001658eb68157e813316b865087e345c187fca422c4c', checks.base_images(dockerfile)[1])
+        self.assertIn('USER 10001:10001', dockerfile)
+        self.assertIn('--shell /usr/sbin/nologin', dockerfile)
+        self.assertIn('HEALTHCHECK', dockerfile)
+        self.assertIn('com.lookahead.gateway.health.ContainerHealthcheck', dockerfile)
+        self.assertNotIn('apk upgrade', dockerfile)
 
     def test_repository_sast_exception_binding_is_current(self):
         checks.load_sast_exceptions()

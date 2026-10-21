@@ -89,3 +89,27 @@ DLV-961 review 2026-10-16: account directory GET, access-summary and test-accoun
 The security helper regressions copy the real exception-bound sources and prove that
 subsequent edits still fail closed. A fresh hosted full CodeQL analysis remains
 required; passing local helpers alone does not certify the hosted security gate.
+
+
+### Gateway exception review — 2026-10-21
+
+The two exact-source CodeQL dispositions were re-reviewed after their October 19
+expiry blocked CI. They are renewed through October 28, 2026, inclusive, with
+unchanged rule IDs, file paths and source hashes. The local Identity pass-through
+forwards Identity cookies and CSRF headers with an origin check; the authenticated
+BFF keeps its own CSRF protection. The login request parameter can request fresh
+OAuth but cannot grant sign-in reuse: reuse requires server authentication, a stored
+client and a successful Domain verification. These are bounded reviewed findings,
+not a clean CodeQL claim. Fresh full hosted analysis must exercise both exceptions;
+changed source, unmatched findings, unused exceptions and expiry still block.
+Regression tests cover the last valid day, the following day, and the original
+expired policy. Review again before renewal; do not roll dates forward automatically.
+
+
+October 21 image remediation: the pinned Alpine Java 21 runtime was blocked by
+a HIGH libexpat finding. The runtime now uses a separately digest-pinned Temurin
+Java 21 Ubuntu 24.04 image, matching the reviewed Domain runtime family. Ubuntu
+account creation preserves UID/GID 10001, a non-login shell and the existing Java
+readiness probe. CI continues to scan both exact bases and the built image,
+including unfixed findings; no image exception or severity change is introduced.
+Local image scans and smoke checks do not certify AWS deployment.

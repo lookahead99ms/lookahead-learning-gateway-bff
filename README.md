@@ -287,8 +287,8 @@ never its message, source snippet, locations or properties.
 
 
 The Docker builder uses digest-pinned Eclipse Temurin Java 21 Ubuntu 24.04
-(`21-jdk-noble`); the runtime uses a separately pinned Java 21 Alpine image
-(`21-jre-alpine`). The runtime uses musl libc and Alpine's account-creation
+(`21-jdk-noble`); the runtime uses a separately pinned Java 21 Ubuntu 24.04 image
+(`21-jre-noble`). The runtime uses glibc and Ubuntu's account-creation
 commands, retains numeric user/group 10001 and the existing Java health probe,
 and needs no added curl or application SDK. Distroless Java 21 Debian candidates
 were investigated but rejected because their complete package scans still found
@@ -455,3 +455,21 @@ or internal seed endpoints are forwarded. Runtime activation remains pending.
 ## People account directory
 
 `GET /bff/api/v1/admin/accounts?query=&page=0` relays the owner directory with the Gateway session and server-held Domain bearer. Only GET is allowlisted; private Identity enumeration is not proxied. Domain enforces owner authorization; browser cookies and Authorization headers are never relayed.
+
+### Workflow run identification and approval context
+
+Actions run titles include the workflow name, branch, event and run number so
+parallel workflows are distinguishable in All workflows. Existing run history
+is unchanged. Approval issues, where produced, show exact source commit links
+and associated PRs merged into main. Push-triggered approvals include the
+verified push range when available; manual/pinned sources are explicitly scoped
+to their exact revision, not claimed as a delta since the previous deployment.
+The central Content/Infra approval flows retain this snapshot with the approval
+receipt and disclose lookup failures or bounded/truncated results. Runtime APIs,
+workflow triggers, AWS grants and existing approval commands are unchanged.
+
+
+The Gateway's two source-bound SAST exceptions were re-reviewed on October 21,
+2026 and expire after October 28. See [security CI](docs/security-ci.md) for scope
+and verification requirements. Expiry, source changes and unmatched findings
+continue to block CI; renewal is never automatic.
