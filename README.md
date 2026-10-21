@@ -287,8 +287,8 @@ never its message, source snippet, locations or properties.
 
 
 The Docker builder uses digest-pinned Eclipse Temurin Java 21 Ubuntu 24.04
-(`21-jdk-noble`); the runtime uses a separately pinned Java 21 Alpine image
-(`21-jre-alpine`). The runtime uses musl libc and Alpine's account-creation
+(`21-jdk-noble`); the runtime uses a separately pinned Java 21 Ubuntu 24.04 image
+(`21-jre-noble`). The runtime uses glibc and Ubuntu's account-creation
 commands, retains numeric user/group 10001 and the existing Java health probe,
 and needs no added curl or application SDK. Distroless Java 21 Debian candidates
 were investigated but rejected because their complete package scans still found

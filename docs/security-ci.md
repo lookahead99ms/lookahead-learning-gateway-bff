@@ -104,3 +104,12 @@ not a clean CodeQL claim. Fresh full hosted analysis must exercise both exceptio
 changed source, unmatched findings, unused exceptions and expiry still block.
 Regression tests cover the last valid day, the following day, and the original
 expired policy. Review again before renewal; do not roll dates forward automatically.
+
+
+October 21 image remediation: the pinned Alpine Java 21 runtime was blocked by
+a HIGH libexpat finding. The runtime now uses a separately digest-pinned Temurin
+Java 21 Ubuntu 24.04 image, matching the reviewed Domain runtime family. Ubuntu
+account creation preserves UID/GID 10001, a non-login shell and the existing Java
+readiness probe. CI continues to scan both exact bases and the built image,
+including unfixed findings; no image exception or severity change is introduced.
+Local image scans and smoke checks do not certify AWS deployment.

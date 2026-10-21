@@ -140,6 +140,15 @@ class SecurityGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '^Expired SAST exception$'):
                 checks.load_sast_exceptions(path, today=date(2026, 10, 21))
 
+    def test_runtime_base_preserves_the_unprivileged_java_contract(self):
+        dockerfile = (checks.ROOT / 'Dockerfile').read_text()
+        self.assertEqual('eclipse-temurin:21-jre-noble@sha256:35501d3f93173b420ac9001658eb68157e813316b865087e345c187fca422c4c', checks.base_images(dockerfile)[1])
+        self.assertIn('USER 10001:10001', dockerfile)
+        self.assertIn('--shell /usr/sbin/nologin', dockerfile)
+        self.assertIn('HEALTHCHECK', dockerfile)
+        self.assertIn('com.lookahead.gateway.health.ContainerHealthcheck', dockerfile)
+        self.assertNotIn('apk upgrade', dockerfile)
+
     def test_repository_sast_exception_binding_is_current(self):
         checks.load_sast_exceptions()
 
