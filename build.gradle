@@ -21,7 +21,7 @@ plugins {
 }
 
 group = 'com.lookahead.learning'
-version = '0.0.1-SNAPSHOT'
+version = providers.gradleProperty('releaseVersion').orElse('0.0.1-SNAPSHOT').get()
 description = 'Look Ahead Gateway BFF'
 
 java {

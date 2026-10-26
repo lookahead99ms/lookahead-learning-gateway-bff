@@ -473,3 +473,16 @@ The Gateway's two source-bound SAST exceptions were re-reviewed on October 21,
 2026 and expire after October 28. See [security CI](docs/security-ci.md) for scope
 and verification requirements. Expiry, source changes and unmatched findings
 continue to block CI; renewal is never automatic.
+
+### Calendar image releases
+
+DEV image releases use one shared `lookahead-dev-ecr` repository and `gateway-bff-vyyyy.mm.dd.hh.<00-nn>` tags. The source Git tag omits `gateway-bff-`. UTC counters start at `00` each hour independently per app. Run `python3 tools/release/release_version.py next --app gateway-bff` to suggest the next version from remote Git tags; this does not create or reserve a tag. Publish the exact source tag through the user-owned Git cycle, then supply it as `release-version` to the manual release workflow on main. CI verifies the tag/source before building and retains app/version/source/config/archive/manifest provenance. Deployment still selects an immutable digest. Prefixes organize images; IAM upload scope covers the shared repository.
+Gradle builds accept `-PreleaseVersion=yyyy.mm.dd.hh.NN`; local builds retain the snapshot default.
+
+
+DEV image publication uses the existing shared deployment role with an
+`image-publish-*` session name required by its trust policy. The role explicitly
+restricts these sessions to ECR publication operations; the workflow retains its
+additional repository-scoped session policy, existing approval and scan gates.
+Infra owns the reviewed policy update and registry provisioning. These local
+workflow changes do not install IAM policies or publish an image.
