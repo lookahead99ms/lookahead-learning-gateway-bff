@@ -337,9 +337,15 @@ before denying authentication. Hosted full-scan proof remains required.
 The dormant `release-image.yml` manual workflow reuses the full CI job, then
 exports its exact scanned image as a one-day archive. Publication loads that
 archive without rebuilding, validates source/Dockerfile/workflow/archive/config
-digests, and uses a separately reviewed DEV OIDC role. It requires an exact main
-SHA, immutable DEV ECR repository and a protected `dev` environment with independent
-review and protected-branch restriction. Unsupported private-repository approval
+digests, and uses a separately reviewed DEV OIDC role. Its only source selector is
+an existing calendar release tag: a `resolve` job resolves the tag to its commit once,
+requires that commit to be on `main`, freezes the record (`release-source` artifact),
+CI builds that commit while the workflow and `tools/release/` run from `main`, the
+frozen record is the expected source for the environment check, and the tag is
+re-checked before credentials. Rollback is a new tag at an older `main` commit; the
+scanned and registry receipts record the built commit and the executed workflow commit
+separately. It requires an immutable DEV ECR repository and a protected `dev`
+environment with independent review and protected-branch restriction. Unsupported private-repository approval
 features block this workflow; a manual trigger alone is insufficient. Registry
 receipt verifies remote manifest/config identity. No workflow was dispatched or
 image published locally. Configure approved settings and action allowlists before
