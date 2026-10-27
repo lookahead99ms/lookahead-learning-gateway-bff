@@ -1,14 +1,9 @@
 {
   "name": "Build once and publish approved DEV image",
-  "run-name": "${{ github.workflow }} | ${{ github.head_ref || github.ref_name }} | ${{ github.event_name }} | #${{ github.run_number }}",
+  "run-name": "${{ github.workflow }} | ${{ inputs.release-version }} | ${{ github.ref_name }} | #${{ github.run_number }}",
   "on": {
     "workflow_dispatch": {
       "inputs": {
-        "approved-source-sha": {
-          "description": "Exact reviewed main source SHA",
-          "required": true,
-          "type": "string"
-        },
         "role-arn": {
           "description": "Reviewed scoped DEV OIDC publisher role ARN",
           "required": true,
@@ -21,7 +16,7 @@
           "default": "509614632283.dkr.ecr.us-east-2.amazonaws.com/lookahead-dev-ecr"
         },
         "release-version": {
-          "description": "Existing Git tag vyyyy.mm.dd.hh.<00-nn> (UTC), bound to reviewed main",
+          "description": "Existing Git tag vyyyy.mm.dd.hh.<00-nn> (UTC) at a main commit; the run resolves it to that commit",
           "type": "string",
           "required": true
         }
@@ -36,15 +31,61 @@
     "cancel-in-progress": false
   },
   "jobs": {
+    "resolve": {
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 10,
+      "permissions": {
+        "contents": "read"
+      },
+      "outputs": {
+        "source-sha": "${{ steps.source.outputs.source_sha }}",
+        "release-version": "${{ steps.source.outputs.release_version }}"
+      },
+      "steps": [
+        {
+          "name": "Checkout trusted release tooling from main",
+          "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Resolve the release tag once and freeze its main commit",
+          "id": "source",
+          "run": "python3 tools/release/release_version.py resolve --app gateway-bff --record \"$RUNNER_TEMP/release-source.json\""
+        },
+        {
+          "name": "Retain the frozen release-source record",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "release-source",
+            "path": "${{ runner.temp }}/release-source.json",
+            "if-no-files-found": "error",
+            "retention-days": 21
+          }
+        }
+      ],
+      "env": {
+        "GH_TOKEN": "${{ github.token }}",
+        "RELEASE_VERSION": "${{ inputs.release-version }}",
+        "ECR_REPOSITORY": "${{ inputs.ecr-repository }}"
+      }
+    },
     "verify": {
+      "needs": "resolve",
       "uses": "./.github/workflows/ci.yml",
       "with": {
         "export-image": true,
-        "release-version": "${{ inputs.release-version }}"
+        "release-version": "${{ inputs.release-version }}",
+        "source-sha": "${{ needs.resolve.outputs.source-sha }}"
       }
     },
     "publish": {
-      "needs": "verify",
+      "needs": [
+        "resolve",
+        "verify"
+      ],
       "runs-on": "ubuntu-24.04",
       "timeout-minutes": 20,
       "environment": "dev",
@@ -55,10 +96,27 @@
       },
       "steps": [
         {
-          "name": "Checkout exact release source",
+          "name": "Checkout trusted release tooling from main",
           "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
           "with": {
             "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Restore the frozen release-source record",
+          "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+          "with": {
+            "name": "release-source",
+            "path": "${{ runner.temp }}"
+          }
+        },
+        {
+          "name": "Checkout the tag-resolved application source for verification only",
+          "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "with": {
+            "ref": "${{ needs.resolve.outputs.source-sha }}",
+            "path": "release-source",
             "persist-credentials": false
           }
         },
@@ -70,26 +128,27 @@
           "run": "python3 tools/release/release_version.py check --app gateway-bff"
         },
         {
-          "name": "Require exact source and protected DEV environment",
+          "name": "Require the frozen release source and protected DEV environment",
           "env": {
-            "GH_TOKEN": "${{ github.token }}",
-            "APPROVED_SHA": "${{ inputs.approved-source-sha }}",
-            "DEPLOY_ROLE": "${{ inputs.role-arn }}",
-            "ECR_REPOSITORY": "${{ inputs.ecr-repository }}"
+            "DEPLOY_ROLE": "${{ inputs.role-arn }}"
           },
-          "run": "test \"$GITHUB_REF\" = refs/heads/main\ngh api \"repos/$GITHUB_REPOSITORY/environments/dev\" > \"$RUNNER_TEMP/dev-environment.json\"\npython3 tools/release/registry.py approval --input \"$RUNNER_TEMP/dev-environment.json\" --revision \"$GITHUB_SHA\" --expected-revision \"$APPROVED_SHA\" --role \"$DEPLOY_ROLE\" --repository \"$ECR_REPOSITORY\""
+          "run": "test \"$GITHUB_REF\" = refs/heads/main\ngh api \"repos/$GITHUB_REPOSITORY/environments/dev\" > \"$RUNNER_TEMP/dev-environment.json\"\npython3 tools/release/registry.py approval --input \"$RUNNER_TEMP/dev-environment.json\" --revision \"$SOURCE_SHA\" --record \"$RELEASE_SOURCE_RECORD\" --role \"$DEPLOY_ROLE\" --repository \"$ECR_REPOSITORY\""
         },
         {
           "name": "Download the same-run scanned artifact",
           "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
           "with": {
-            "name": "release-image-${{ github.sha }}",
+            "name": "release-image-${{ needs.resolve.outputs.source-sha }}",
             "path": "${{ runner.temp }}/release-image"
           }
         },
         {
           "name": "Load and verify scanned image without rebuilding",
-          "run": "python3 tools/release/image.py import --directory \"$RUNNER_TEMP/release-image\" > \"$RUNNER_TEMP/release-image-id\""
+          "run": "python3 tools/release/image.py import --directory \"$RUNNER_TEMP/release-image\" --source-root release-source > \"$RUNNER_TEMP/release-image-id\""
+        },
+        {
+          "name": "Recheck release tag before upload credentials",
+          "run": "python3 tools/release/release_version.py recheck --app gateway-bff --record \"$RUNNER_TEMP/release-source.json\""
         },
         {
           "name": "Use short-lived DEV OIDC credentials",
@@ -107,17 +166,14 @@
         },
         {
           "name": "Publish exact scanned image into immutable DEV repository",
-          "env": {
-            "ECR_REPOSITORY": "${{ inputs.ecr-repository }}"
-          },
-          "run": "python3 tools/release/release_version.py check --app gateway-bff\nIMAGE_TAG=\"gateway-bff-$RELEASE_VERSION\"\nrepository_name=\"${ECR_REPOSITORY#*/}\"\nmutability=\"$(aws ecr describe-repositories --repository-names \"$repository_name\" --query 'repositories[0].imageTagMutability' --output text)\"\ntest \"$mutability\" = IMMUTABLE\naws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin \"${ECR_REPOSITORY%%/*}\"\ndocker tag \"$(cat \"$RUNNER_TEMP/release-image-id\")\" \"$ECR_REPOSITORY:$IMAGE_TAG\"\ndocker push --platform linux/amd64 \"$ECR_REPOSITORY:$IMAGE_TAG\"\naws ecr batch-get-image --repository-name \"$repository_name\" --image-ids \"imageTag=$IMAGE_TAG\" --output json > \"$RUNNER_TEMP/ecr-image.json\"\npython3 tools/release/registry.py bind --input \"$RUNNER_TEMP/ecr-image.json\" --revision \"$GITHUB_SHA\" --repository \"$ECR_REPOSITORY\" --image-receipt \"$RUNNER_TEMP/release-image/image.json\" --output \"$RUNNER_TEMP/registry-image.json\""
+          "run": "python3 tools/release/release_version.py check --app gateway-bff\nIMAGE_TAG=\"gateway-bff-$RELEASE_VERSION\"\nrepository_name=\"${ECR_REPOSITORY#*/}\"\nmutability=\"$(aws ecr describe-repositories --repository-names \"$repository_name\" --query 'repositories[0].imageTagMutability' --output text)\"\ntest \"$mutability\" = IMMUTABLE\naws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin \"${ECR_REPOSITORY%%/*}\"\ndocker tag \"$(cat \"$RUNNER_TEMP/release-image-id\")\" \"$ECR_REPOSITORY:$IMAGE_TAG\"\ndocker push --platform linux/amd64 \"$ECR_REPOSITORY:$IMAGE_TAG\"\naws ecr batch-get-image --repository-name \"$repository_name\" --image-ids \"imageTag=$IMAGE_TAG\" --output json > \"$RUNNER_TEMP/ecr-image.json\"\npython3 tools/release/registry.py bind --input \"$RUNNER_TEMP/ecr-image.json\" --revision \"$SOURCE_SHA\" --repository \"$ECR_REPOSITORY\" --image-receipt \"$RUNNER_TEMP/release-image/image.json\" --output \"$RUNNER_TEMP/registry-image.json\""
         },
         {
           "name": "Retain immutable registry release receipt",
           "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
           "with": {
-            "name": "registry-image-${{ github.sha }}",
-            "path": "${{ runner.temp }}/registry-image.json",
+            "name": "registry-image-${{ needs.resolve.outputs.source-sha }}",
+            "path": "${{ runner.temp }}/registry-image.json\n${{ runner.temp }}/release-source.json",
             "if-no-files-found": "error",
             "retention-days": 21
           }
@@ -133,7 +189,10 @@
       ],
       "env": {
         "RELEASE_VERSION": "${{ inputs.release-version }}",
-        "GH_TOKEN": "${{ github.token }}"
+        "GH_TOKEN": "${{ github.token }}",
+        "SOURCE_SHA": "${{ needs.resolve.outputs.source-sha }}",
+        "RELEASE_SOURCE_RECORD": "${{ runner.temp }}/release-source.json",
+        "ECR_REPOSITORY": "${{ inputs.ecr-repository }}"
       }
     }
   }
