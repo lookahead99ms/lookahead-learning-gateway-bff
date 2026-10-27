@@ -35,3 +35,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SharedPublisherSessionTests(unittest.TestCase):
+    def test_credentials_use_trust_bound_publisher_session(self):
+        from pathlib import Path
+        import json
+        workflow = json.loads((Path(__file__).resolve().parents[2] / '.github/workflows/release-image.yml').read_text())
+        steps = [step for job in workflow['jobs'].values() for step in job.get('steps', [])
+                 if step.get('uses', '').startswith('aws-actions/configure-aws-credentials@')]
+        self.assertTrue(steps)
+        for step in steps:
+            self.assertEqual(step['with']['role-session-name'], 'image-publish-${{ github.run_id }}-1')
+            self.assertIn('inline-session-policy', step['with'])
+            self.assertLessEqual(step['with']['role-duration-seconds'], 900)
