@@ -105,6 +105,18 @@ changed source, unmatched findings, unused exceptions and expiry still block.
 Regression tests cover the last valid day, the following day, and the original
 expired policy. Review again before renewal; do not roll dates forward automatically.
 
+### Gateway actuator-info exception binding — 2026-10-27
+
+DLV-914 adds only the GET `/actuator/info` permit matcher and its comment to the
+exception-bound `GatewayConfiguration.java`. The local Identity pass-through
+chain and BFF session CSRF configuration are unchanged. After reviewing that
+diff and running the complete Gateway checks, the CSRF exception is rebound to
+the current source; its rule, path and October 28 expiry remain unchanged.
+The actuator HTTP tests cover release metadata, rejection of POST, and denial
+of the other tested actuator routes. A security-helper regression rejects the
+previous source digest against the current file. Fresh hosted full CodeQL remains
+required; this source-binding update is not a hosted scan result.
+
 
 October 21 image remediation: the pinned Alpine Java 21 runtime was blocked by
 a HIGH libexpat finding. The runtime now uses a separately digest-pinned Temurin
