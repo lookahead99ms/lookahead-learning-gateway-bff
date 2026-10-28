@@ -152,6 +152,16 @@ class SecurityGateTests(unittest.TestCase):
     def test_repository_sast_exception_binding_is_current(self):
         checks.load_sast_exceptions()
 
+    def test_pre_actuator_info_csrf_digest_cannot_authorize_current_source(self):
+        policy = checks.json.loads(checks.SAST_EXCEPTIONS.read_text())
+        entry = next(row for row in policy['exceptions'] if row['ruleId'] == 'java/spring-disabled-csrf-protection')
+        entry['sourceSha256'] = 'c93e48b2552460aae6b189d5954029f5d5c904c4dddc80c527a9669302cfd2d3'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'exceptions.json'
+            path.write_text(checks.json.dumps(policy))
+            with self.assertRaisesRegex(ValueError, '^SAST exception source changed or is missing$'):
+                checks.load_sast_exceptions(path, today=date(2026, 10, 27))
+
     def test_trace_notifications_are_informational_but_warnings_still_block(self):
         run = {'tool': {'driver': {'name': 'CodeQL', 'rules': [{'id': 'fixture'}]}},
                'results': [], 'invocations': [{'executionSuccessful': True,

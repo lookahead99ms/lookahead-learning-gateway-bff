@@ -64,6 +64,8 @@ public class GatewayConfiguration {
                 .sessionManagement(session->session.sessionFixation(fixation->fixation.changeSessionId()))
                 .authorizeHttpRequests(auth->auth
                         .requestMatchers(org.springframework.http.HttpMethod.GET,"/bff/api/v1/membership/plans","/bff/api/v1/sales/active").permitAll()
+                        // DLV-914: /actuator/info reports build.version, releaseTag and sourceRevision; GET only, nothing else exposed.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,"/actuator/info").permitAll()
                         .requestMatchers("/bff/login","/bff/logout/complete","/bff/api/v1/auth/csrf","/oauth2/authorization/**","/login/oauth2/code/**","/content/**","/actuator/health","/actuator/health/**","/api/v1/auth/options","/api/v1/auth/csrf").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/bff/author/previews/**").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.HEAD, "/bff/author/previews/**").authenticated()

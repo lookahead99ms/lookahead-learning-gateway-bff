@@ -29,7 +29,7 @@ public final class DevAdmission extends OncePerRequestFilter {
             throws IOException, ServletException {
         String path = request.getRequestURI();
         if (request.getLocalPort() == 8081 && Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(request.getRemoteAddr())
-                && path.startsWith("/actuator/health")) { chain.doFilter(request, response); return; }
+                && (path.startsWith("/actuator/health") || path.equals("/actuator/info"))) { chain.doFilter(request, response); return; }
         if (Set.of("/dev/access", "/dev/csrf", "/dev/leave", "/dev/leave/complete", "/dev/oauth2/authorization/admission", "/dev/login/oauth2/code/admission").contains(path)) {
             chain.doFilter(request, response); return;
         }
