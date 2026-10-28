@@ -131,6 +131,10 @@
           }
         },
         {
+          "name": "Point the release-source record at the runner temp directory",
+          "run": "echo \"RELEASE_SOURCE_RECORD=$RUNNER_TEMP/release-source.json\" >> \"$GITHUB_ENV\""
+        },
+        {
           "name": "Checkout the tag-resolved application source for verification only",
           "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
           "with": {
@@ -210,7 +214,6 @@
         "RELEASE_VERSION": "${{ inputs.release-version }}",
         "GH_TOKEN": "${{ github.token }}",
         "SOURCE_SHA": "${{ needs.resolve.outputs.source-sha }}",
-        "RELEASE_SOURCE_RECORD": "${{ runner.temp }}/release-source.json",
         "ECR_REPOSITORY": "${{ inputs.ecr-repository }}"
       }
     }
