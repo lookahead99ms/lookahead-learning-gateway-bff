@@ -1,6 +1,7 @@
 FROM eclipse-temurin:21-jdk-noble@sha256:b468c3fc688b14450571494f588bd939378e7fd542ed5a73f8efc13f17872a87 AS build
 ARG RELEASE_VERSION=dev
 ARG BUILD_VERSION=0.0.1-SNAPSHOT
+ARG SOURCE_REVISION=local
 WORKDIR /workspace
 ENV GRADLE_USER_HOME=/tmp/gradle-cache
 COPY gradlew ./
@@ -8,19 +9,22 @@ COPY gradle/wrapper/ gradle/wrapper/
 RUN ./gradlew --no-daemon --version
 COPY build.gradle settings.gradle ./
 COPY src/ src/
-RUN ./gradlew --no-daemon "-PreleaseVersion=$BUILD_VERSION" clean test bootJar \
+# DLV-914: the jar is lookahead-gateway-<version>.jar and /actuator/info reports version, release tag and commit.
+RUN ./gradlew --no-daemon "-PreleaseVersion=$BUILD_VERSION" "-PreleaseTag=$RELEASE_VERSION" "-PsourceRevision=$SOURCE_REVISION" clean test bootJar \
+    && test -f "/workspace/build/libs/lookahead-gateway-$BUILD_VERSION.jar" \
     && mkdir /workspace/health \
     && javac --release 21 -d /workspace/health src/main/java/com/lookahead/gateway/health/ContainerHealthcheck.java
 
 FROM eclipse-temurin:21-jre-noble@sha256:35501d3f93173b420ac9001658eb68157e813316b865087e345c187fca422c4c AS runtime
 ARG RELEASE_VERSION=dev
+ARG BUILD_VERSION=0.0.1-SNAPSHOT
 ARG SOURCE_REVISION=local
 LABEL org.opencontainers.image.version="$RELEASE_VERSION" \
       org.opencontainers.image.revision="$SOURCE_REVISION" \
       com.lookahead.app="gateway-bff"
 WORKDIR /opt/lookahead
 RUN groupadd --gid 10001 lookahead && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin lookahead
-COPY --from=build --chown=10001:10001 /workspace/build/libs/lookahead-gateway.jar /opt/lookahead/app.jar
+COPY --from=build --chown=10001:10001 /workspace/build/libs/lookahead-gateway-${BUILD_VERSION}.jar /opt/lookahead/app.jar
 COPY --from=build --chown=10001:10001 /workspace/health /opt/lookahead/health
 COPY deployment/container/dns.security /opt/lookahead/dns.security
 USER 10001:10001

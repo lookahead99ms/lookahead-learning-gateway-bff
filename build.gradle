@@ -117,10 +117,20 @@ tasks.named('check') {
 
 springBoot {
     mainClass = 'com.lookahead.gateway.GatewayApplication'
+    // DLV-914: /actuator/info reports build.version (releaseVersion), the calendar release tag and the Git commit.
+    buildInfo {
+        properties {
+            additional = [
+                releaseTag: providers.gradleProperty('releaseTag').orElse('dev').get(),
+                sourceRevision: providers.gradleProperty('sourceRevision').orElse('local').get()
+            ]
+        }
+    }
 }
 
 tasks.named('bootJar') {
-    archiveFileName = 'lookahead-gateway.jar'
+    // DLV-914: the jar carries the release version; the Dockerfile copies the exact versioned name.
+    archiveFileName = "lookahead-gateway-${project.version}.jar"
 }
 
 tasks.named('jar') {
