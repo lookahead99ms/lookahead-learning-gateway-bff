@@ -406,8 +406,19 @@ sessions alive. Leave DEV attempts learner sign-out, clears both local states ev
 if the upstream is unavailable, then chains both fixed provider logout redirects.
 A failed remote operation is not reported as confirmed revocation.
 
-Credentials are startup-fetched exact versions mounted under `/run/credentials`;
-public provider trust and internal client identity remain separate. This profile
+ECS injects immutable-version secret fields. Private keys must be one complete
+unencrypted PKCS8 PEM block with line-separated boundaries; incomplete envelopes,
+extra blocks and surrounding material are rejected before startup. `InjectedCredentials` validates
+certificate validity, remaining lifetime, SAN, EKU, chain, matching PKCS8 keys,
+Gateway's exact client subject and distinct public/internal keys before context
+refresh, then installs scalar properties and inline Spring PEM bundles. Public
+provider trust and internal client identity remain separate; no TLS files or
+Secrets Manager application client are required. Injected names are
+`LOOKAHEAD_TLS_{SCHEMA,SERVER_CERTIFICATE,SERVER_KEY,CLIENT_CERTIFICATE,CLIENT_KEY,TRUST}`,
+`APP_OAUTH_CLIENT_ID`, `LOOKAHEAD_GATEWAY_CLIENT_SECRET`,
+`LOOKAHEAD_ADMISSION_CLIENT_ID`, `LOOKAHEAD_ADMISSION_CLIENT_SECRET`, and
+`LOOKAHEAD_DOMAIN_GATEWAY_SECRET`; `LOOKAHEAD_TLS_SERVER_NAME` is public configuration.
+A validation failure reports only a fixed diagnostic and denies startup. This profile
 is DEV-only and is not a replacement for the ordinary local configuration.
 It is locally implemented, not deployed. Infra owns the candidate templates,
 finite runtime jobs and `docs/deployment/lower-cost-dev-session-runbook.md`.
