@@ -261,7 +261,7 @@ reachability, ECS secret delivery, deployed cookie/proxy behavior or multi-insta
 recovery. Those remain deployment integration checks. The Gateway owns no RDS
 connection; database connectivity and schema/readiness tests belong to Domain.
 
-The container readiness probe is production Java source at `src/main/java/com/lookahead/gateway/health/ContainerHealthcheck.java`, so the ordinary JaCoCo report includes it. Tests use loopback HTTP fixtures to cover healthy and failed responses, malformed bodies, redirects, unavailable endpoints, timeouts and interruption. The container still probes only `127.0.0.1:8080/actuator/health/readiness`, with a two-second connection limit and three-second request limit. The process-exit wrapper remains in the measured source inventory.
+The container readiness probe is production Java source at `src/main/java/com/lookahead/gateway/health/ContainerHealthcheck.java`, so the ordinary JaCoCo report includes it. Tests use loopback HTTP fixtures to cover healthy and failed responses, malformed bodies, redirects, unavailable endpoints, timeouts and interruption. The container probes `127.0.0.1:8080/actuator/health/readiness`, or `127.0.0.1:8081/actuator/health/readiness` when the task sets `LOOKAHEAD_RUNTIME_MODE=lower-cost-dev` (that profile moves actuator to the loopback management port), with a two-second connection limit and three-second request limit. The process-exit wrapper remains in the measured source inventory.
 
 Docker resolves the checksum-pinned Gradle wrapper in a source-independent layer before copying build declarations and application sources. This reuses the wrapper download when source files change; dependency versions and the `clean test bootJar` build remain unchanged.
 
@@ -434,6 +434,54 @@ certificate is restricted to these internal destinations; public OAuth connectio
 use the public trust context. A slot change loses in-memory sessions and requires
 sign-in again. See Infra's `docs/deployment/lower-cost-dev-release-slots.md` for
 candidate gates, guarded cutover and operator-approved rollback.
+
+### DEV activation preparation (DLV-914, October 30, 2026)
+
+The DEV task definition Infra generates for this application (`aws/compute/lower_cost_dev_workloads.py`,
+written to `aws/ingress/templates/dev/gateway.template.json`) runs the image with
+`SPRING_PROFILES_ACTIVE=lower-cost-dev`, `LOOKAHEAD_ENVIRONMENT=dev`, `LOOKAHEAD_RUNTIME_MODE=lower-cost-dev`,
+`LOOKAHEAD_DOMAIN_TRANSPORT=application-mtls`, `LOOKAHEAD_RELEASE_SLOT=blue|green`,
+`LOOKAHEAD_DOMAIN_UPSTREAM=https://domain-<slot>.lookahead-dev.internal:8443`, the public hostname as
+`LOOKAHEAD_TLS_SERVER_NAME` and `LOOKAHEAD_FRONTEND_ORIGIN=https://<hostname>`, the application pool issuer,
+managed-login origin and scope prefix, the admission pool ID and managed-login origin, the operations table
+name in `LOOKAHEAD_DEV_STATE_TABLE`, `AWS_REGION`, and `JAVA_TOOL_OPTIONS` pointing at
+`/opt/lookahead/dns.security`. ECS injects the eleven credential fields listed above from immutable secret
+versions; `APP_OAUTH_CLIENT_ID` and `LOOKAHEAD_ADMISSION_CLIENT_ID` arrive as injected JSON fields, not
+plain environment values. The container listens on TLS 8443 only (plaintext on that port is refused with
+400), serves actuator health/info on loopback HTTP 8081, and the ECS health command runs
+`com.lookahead.gateway.health.ContainerHealthcheck`, which probes 8081 in this mode. The NLB target group
+checks TCP 8443; no HTTP health path is exposed publicly.
+
+`LowerCostDevRuntimeIntegrationTest` boots the real application with exactly these names and synthetic
+injected certificates and secrets: it proves the `spring.factories` initializer runs, TLS serves the injected
+certificate, readiness answers on the management port, every protected route (including `/actuator/info`,
+`/oauth2/authorization/lookahead` and `/bff/login`) is gated by admission, `/dev/access` and the admission
+OAuth start work against the separate admission client with PKCE, `prompt=login` and `max_age=0`, and a
+missing injected field denies startup with the fixed diagnostic. It makes no AWS call; it is not proof of
+Cognito, DynamoDB, Service discovery, IAM or NLB behavior. `DomainIntegrationBindingsTest` pins the bindings
+Domain's `docs/dev-activation.md` expects: the slot-specific Domain DNS name on application mTLS 8443 only
+(Domain's loopback 8081 readiness port, the other slot, plaintext and bare hostnames are refused before any
+connection), the exact application issuer, client ID and the four scopes Domain's token verifier requires,
+and one shared DomainGateway secret binding.
+
+Runtime AWS calls and their IAM needs (task role `lookahead-dev-app-task`): `cognito-idp:AdminGetUser` on
+the admission pool only, and `dynamodb:GetItem` on the operations table limited to partition key `dev`.
+The Gateway never writes the table and never reads Secrets Manager itself; secret delivery and image pulls
+are execution-role concerns. `/dev/session` reports `deadline`, `warning` and whether an `operation` guard
+is held; it does not invent a lifecycle phase, and an unreachable table answers 503.
+
+October 30 fix: before or after admission expiry, `GET /dev/session` (and any other non-bypassed `/dev/`
+path) now answers the JSON `401 DEV_ADMISSION_REQUIRED` / `503 DEV_ADMISSION_UNAVAILABLE` contract instead
+of a login-page redirect, matching the other API prefixes; the Web shell polls it as an API. Tests:
+`DevAdmissionTest`, `ContainerHealthcheckTest`, `LowerCostDevRuntimeIntegrationTest`.
+
+`deployment/service.yaml` remains the retained `lookahead-service/v2` candidate for Infra's older
+Service Connect planner (port 8080, `service-connect-tls`); it is not the lower-cost DEV task contract
+above and is left unchanged for that consumer. The release pipeline's optional `DEV_VERIFY_URL` cannot
+target this application in DEV: the candidate slot is reachable only inside the VPC and every public route
+requires admission, so the variable stays unset and functional proof comes from Infra's finite verifier.
+Exact resource bindings, IAM requirements and findings are recorded in the private Content handoff
+`docs/evidence/DLV-914-gateway-activation-preparation-20261030/`.
 
 Lower-cost DEV security events use the dedicated `lookahead.security.audit` logger
 with fixed outcome names and random event IDs. The filter preserves HTTP responses

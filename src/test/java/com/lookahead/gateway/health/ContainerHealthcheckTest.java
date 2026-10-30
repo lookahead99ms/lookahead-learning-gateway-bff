@@ -65,6 +65,14 @@ class ContainerHealthcheckTest {
         assertEquals(1, gets.get());
     }
 
+    @Test void probeFollowsTheRuntimeModeOfTheTaskDefinition() {
+        // Infra's lower-cost DEV task sets LOOKAHEAD_RUNTIME_MODE=lower-cost-dev; actuator then lives only on loopback 8081.
+        assertEquals(URI.create("http://127.0.0.1:8081/actuator/health/readiness"), ContainerHealthcheck.readinessUri("lower-cost-dev"));
+        for (String other : new String[]{null, "", "local", "LOWER-COST-DEV", "lower-cost-dev "})
+            assertEquals(ContainerHealthcheck.READINESS_URI, ContainerHealthcheck.readinessUri(other), String.valueOf(other));
+        assertEquals("127.0.0.1", ContainerHealthcheck.MANAGEMENT_READINESS_URI.getHost());
+    }
+
     @Test void doesNotFollowRedirectsToHealthyEndpoint() {
         AtomicInteger redirected = new AtomicInteger();
         server.createContext("/actuator/health/readiness", exchange -> {

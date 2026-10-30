@@ -31,6 +31,22 @@ class DevAdmissionTest {
             assertNull(chain.getRequest(), String.join(" ", attempt)); assertEquals("/dev/access", response.getRedirectedUrl());
         }
     }
+    @Test void statusRouteAnswersJsonNotLoginHtmlWithoutAdmission() throws Exception {
+        // The Web shell polls /dev/session as an API; before or after admission it must never receive login HTML.
+        var filter = new DevAdmission((u,s) -> true, Clock.fixed(now, ZoneOffset.UTC));
+        var anonymous = new MockHttpServletResponse(); filter.doFilter(request("/dev/session",null,null),anonymous,new MockFilterChain());
+        assertEquals(401,anonymous.getStatus()); assertNull(anonymous.getRedirectedUrl());
+        assertEquals("application/json",anonymous.getContentType()); assertTrue(anonymous.getContentAsString().contains("DEV_ADMISSION_REQUIRED"));
+        assertEquals("no-store",anonymous.getHeader("Cache-Control"));
+        var expired = request("/dev/session", now.minusSeconds(8*3600), now); var old=(MockHttpSession)expired.getSession();
+        var afterExpiry = new MockHttpServletResponse(); filter.doFilter(expired, afterExpiry, new MockFilterChain());
+        assertEquals(401, afterExpiry.getStatus()); assertNull(afterExpiry.getRedirectedUrl()); assertTrue(old.isInvalid());
+        var outage = request("/dev/session", now.minusSeconds(600), now.minusSeconds(400)); var unavailable=new MockHttpServletResponse();
+        new DevAdmission((u,s)->{throw new IllegalStateException();},Clock.fixed(now,ZoneOffset.UTC)).doFilter(outage,unavailable,new MockFilterChain());
+        assertEquals(503,unavailable.getStatus()); assertTrue(unavailable.getContentAsString().contains("DEV_ADMISSION_UNAVAILABLE"));
+        var admitted = request("/dev/session", now.minusSeconds(60), now); var chain = new MockFilterChain();
+        filter.doFilter(admitted, new MockHttpServletResponse(), chain); assertNotNull(chain.getRequest());
+    }
     @Test void disabledTesterClearsBothStates() throws Exception {
         var req = request("/", now.minusSeconds(600), now.minusSeconds(300)); var old = (MockHttpSession)req.getSession();
         old.setAttribute("SPRING_SECURITY_CONTEXT", "learner");

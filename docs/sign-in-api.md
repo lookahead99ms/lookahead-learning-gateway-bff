@@ -81,3 +81,22 @@ authorization contract. Provider endpoints retain HTTPS and standard trust;
 requests never follow redirects. Local keeps its existing transport configuration.
 Controlled-response tests do not establish deployed proxy encryption or certificate
 rotation; those remain release evidence requirements.
+
+## Lower-cost DEV admission routes (`lower-cost-dev` profile)
+
+These Gateway-owned routes exist only when the DEV admission profile is active; they are not
+part of Local or PROD. Every other route requires an admitted session first.
+
+| Method | Path | Response |
+| --- | --- | --- |
+| GET | `/dev/access` | `200 text/html` access page linking to `/dev/oauth2/authorization/admission`; `Content-Security-Policy: default-src 'none'` |
+| GET | `/dev/oauth2/authorization/admission` | `302` to the admission pool's managed login with PKCE, `prompt=login`, `max_age=0` |
+| GET | `/dev/login/oauth2/code/admission` | admission callback; enabled tester with fresh `auth_time` → `302 /`; disabled/unknown or stale authentication → `403`; directory unavailable → `503` |
+| GET | `/dev/csrf` | `200 {"headerName":"X-CSRF-TOKEN","token":...}` (no admission required) |
+| GET | `/dev/session` | admitted: `200 {"dev":true,"deadline":"" or ISO instant,"warning":bool,"maintenance":bool}`; operations table unavailable: `503 {"code":"DEV_STATUS_UNAVAILABLE"}`; not admitted or expired: `401 {"code":"DEV_ADMISSION_REQUIRED"}`; admission directory unavailable during the freshness recheck: `503 {"code":"DEV_ADMISSION_UNAVAILABLE"}` (October 30, 2026: previously a `302` redirect to `/dev/access`) |
+| POST | `/dev/leave` | requires `X-CSRF-TOKEN`; `200 {"logoutUrl","learnerSignOutConfirmed","providerRevocationConfirmed":"false"}`; missing token `403` |
+| GET | `/dev/leave/complete` | `302` to the admission pool's managed logout returning to `/dev/access` |
+
+Before admission, browser navigation routes answer `302 /dev/access`; `/api/`, `/bff/`, `/content/`,
+`/dev/` and non-GET requests answer `401 {"code":"DEV_ADMISSION_REQUIRED"}` JSON. All responses are
+`Cache-Control: no-store`. `/dev/session` polling does not extend learner idle expiry.
