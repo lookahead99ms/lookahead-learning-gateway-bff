@@ -17,7 +17,7 @@ buildscript {
 plugins {
     id 'java'
     id 'jacoco'
-    id 'org.springframework.boot' version '4.1.1'
+    id 'org.springframework.boot' version '4.1.2'
 }
 
 group = 'com.lookahead.learning'
@@ -35,7 +35,7 @@ repositories {
 }
 
 dependencies {
-    implementation enforcedPlatform('org.springframework.boot:spring-boot-dependencies:4.1.1')
+    implementation enforcedPlatform('org.springframework.boot:spring-boot-dependencies:4.1.2')
     implementation 'commons-logging:commons-logging'
     implementation('software.amazon.awssdk:cognitoidentityprovider:2.55.12') {
         exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
