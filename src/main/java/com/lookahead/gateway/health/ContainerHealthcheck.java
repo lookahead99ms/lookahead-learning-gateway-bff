@@ -9,13 +9,19 @@ import java.time.Duration;
 /** Container readiness probe using only the Java runtime already in the image. */
 public final class ContainerHealthcheck {
     static final URI READINESS_URI = URI.create("http://127.0.0.1:8080/actuator/health/readiness");
+    /** The lower-cost DEV profile serves actuator only on its loopback management port 8081 (application-lower-cost-dev.yml). */
+    static final URI MANAGEMENT_READINESS_URI = URI.create("http://127.0.0.1:8081/actuator/health/readiness");
 
     private ContainerHealthcheck() {
     }
 
     public static void main(String[] args) {
-        System.exit(check("lower-cost-dev".equals(System.getenv("LOOKAHEAD_RUNTIME_MODE"))
-                ? URI.create("http://127.0.0.1:8081/actuator/health/readiness") : READINESS_URI));
+        System.exit(check(readinessUri(System.getenv("LOOKAHEAD_RUNTIME_MODE"))));
+    }
+
+    /** ECS sets LOOKAHEAD_RUNTIME_MODE=lower-cost-dev; every other mode keeps the container port 8080 probe. */
+    static URI readinessUri(String runtimeMode) {
+        return "lower-cost-dev".equals(runtimeMode) ? MANAGEMENT_READINESS_URI : READINESS_URI;
     }
 
     static int check(URI readinessUri) {

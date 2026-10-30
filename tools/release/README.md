@@ -51,7 +51,10 @@ the application is built from the commit the release tag resolves to (`sourceSha
    the change sets and verifies the exact running tasks; the candidate result is retained.
 7. **Verify DEV app** (`verify-dev`): `candidate.py verify` proves the Infra result names this tag and
    the digest ECR returned at publish; with `DEV_VERIFY_URL` set, the live candidate must answer
-   200 and name the tag. A failed verification rolls back without a question.
+   200 and name the tag. A failed verification rolls back without a question. For the Gateway's lower-cost DEV candidate
+   leave `DEV_VERIFY_URL` unset: the inactive slot is not publicly reachable and every public Gateway route
+   requires DEV admission, so a bare URL probe cannot answer 200; Infra's finite verifier supplies the
+   functional proof.
 8. **Keep DEV or roll back** (`decide-dev`): a third owner issue bound to this run:
    `APPROVE KEEP DEV <version>` keeps and proceeds, `APPROVE ROLLBACK DEV <version>` restores the
    previous release, `REJECT` stops with nothing changed; 40-minute window.

@@ -47,7 +47,8 @@ public final class DevAdmission extends OncePerRequestFilter {
         if (admitted) { chain.doFilter(request, response); return; }
         if (!unavailable && session != null) { SecurityAuditFilter.record(SecurityAuditFilter.Event.SESSION_ENDED); session.invalidate(); org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
         response.setHeader("Cache-Control", "no-store");
-        if (unavailable || path.startsWith("/api/") || path.startsWith("/bff/") || path.startsWith("/content/") || !"GET".equals(request.getMethod())) {
+        // /dev/session is polled by the Web shell as an API; the bypassed /dev routes above never reach here.
+        if (unavailable || path.startsWith("/api/") || path.startsWith("/bff/") || path.startsWith("/content/") || path.startsWith("/dev/") || !"GET".equals(request.getMethod())) {
             response.setStatus(unavailable ? 503 : 401); response.setContentType("application/json");
             response.getWriter().write(unavailable ? "{\"code\":\"DEV_ADMISSION_UNAVAILABLE\"}" : "{\"code\":\"DEV_ADMISSION_REQUIRED\"}");
         } else response.sendRedirect("/dev/access");
