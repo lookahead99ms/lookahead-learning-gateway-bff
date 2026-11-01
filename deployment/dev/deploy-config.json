@@ -1,0 +1,71 @@
+{
+  "schema": "lookahead-app-deploy-config/v1",
+  "app": "gateway-bff",
+  "service": "gateway",
+  "account": "509614632283",
+  "region": "us-east-2",
+  "imageRepository": "509614632283.dkr.ecr.us-east-2.amazonaws.com/lookahead-dev-ecr",
+  "deployRoleArn": "arn:aws:iam::509614632283:role/lookahead-dev-deploy",
+  "cloudFormationRoleArn": "arn:aws:iam::509614632283:role/lookahead-dev-cfn-provision",
+  "sessionPrefix": "gateway-deploy",
+  "cluster": "arn:aws:ecs:us-east-2:509614632283:cluster/lookahead-dev-cluster",
+  "clusterName": "lookahead-dev-cluster",
+  "logGroup": "/lookahead/dev/gateway",
+  "namespaceName": "lookahead-dev.internal",
+  "slots": {
+    "blue": {
+      "stack": "lookahead-dev-gateway-blue",
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-2:509614632283:targetgroup/lookahead-dev-gateway-blue/91715c2a9b4ca9d7"
+    },
+    "green": {
+      "stack": "lookahead-dev-gateway-green",
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-2:509614632283:targetgroup/lookahead-dev-gateway-green/a2207b41954b822a"
+    }
+  },
+  "flip": {
+    "mode": "listener",
+    "listenerStack": "lookahead-dev-ingress",
+    "note": "Change set app-<run>-flip sets ActiveSlot on the listener stack (lookahead-dev-edge after phase 3) with the previous template; every other parameter keeps its value and tags are untouched. The NLB listener 443 then forwards to the candidate target group."
+  },
+  "coupling": {
+    "requiresSameSlot": [
+      "lookahead-dev-web-",
+      "lookahead-dev-domain-"
+    ],
+    "note": "Phase 1: the Gateway derives web-<slot> and domain-<slot> from its own slot, so both must already run in the candidate slot (removed in phase 2, DLV-968 T12)."
+  },
+  "observationMinutes": 15,
+  "probeUrl": "https://dev.devlookahead.com/",
+  "parameters": {
+    "Cluster": "arn:aws:ecs:us-east-2:509614632283:cluster/lookahead-dev-cluster",
+    "ApplicationSubnets": "subnet-0cce664b4200b0081,subnet-0ea67dc66d4debb56",
+    "TaskRoleArn": "arn:aws:iam::509614632283:role/lookahead-dev-app-task",
+    "ExecutionRoleArn": "arn:aws:iam::509614632283:role/lookahead-dev-ecs-execution",
+    "ServiceSecurityGroup": "sg-02093dd30f7345e23",
+    "LogGroupName": "/lookahead/dev/gateway",
+    "TlsSecretArn": "arn:aws:secretsmanager:us-east-2:509614632283:secret:lookahead-dev-gateway-tls-iCOgUC",
+    "TlsVersion": "51a4388f-486e-4a48-9013-76b0832cbc05",
+    "GatewayClientSecretArn": "arn:aws:secretsmanager:us-east-2:509614632283:secret:lookahead-dev-cognito-user-identity-a2SPPX",
+    "GatewayIdentityVersion": "e742636e-862b-4b8b-bf8c-88cd7bc2067f",
+    "AdmissionClientSecretArn": "arn:aws:secretsmanager:us-east-2:509614632283:secret:lookahead-dev-platform-access-crx4px",
+    "AdmissionVersion": "104d450e-1358-4326-af90-b1678b16842d",
+    "DomainGatewaySecretArn": "arn:aws:secretsmanager:us-east-2:509614632283:secret:lookahead-dev-domain-gateway-R7brdT",
+    "DomainGatewayVersion": "fe3fd602-9a06-d552-aed5-1a14f8ff27c5",
+    "PublicHostname": "dev.devlookahead.com",
+    "ApplicationIssuer": "https://cognito-idp.us-east-2.amazonaws.com/us-east-2_edT1KP4r9",
+    "ScopePrefix": "lookahead-dev",
+    "ApplicationManagedLogin": "https://lookahead-dev-application-login.auth.us-east-2.amazoncognito.com",
+    "AdmissionPoolId": "us-east-2_giwDiRKqs",
+    "AdmissionManagedLogin": "https://lookahead-dev-admission-login.auth.us-east-2.amazoncognito.com",
+    "DevStateTable": "lookahead-dev-operations"
+  },
+  "slotParameters": {
+    "TargetGroupArn": "targetGroupArn"
+  },
+  "logFailurePatterns": [
+    "ERROR",
+    "startup denied",
+    "AccessDeniedException",
+    "Unable to create tempDir"
+  ]
+}
