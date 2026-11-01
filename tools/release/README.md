@@ -105,9 +105,11 @@ Environment `dev` allowing exactly the `main` branch and **without** required re
 issue is the approval; a reviewer rule would add GitHub's deployment pop-up on top of it).
 Repository variables: `RELEASE_ON_MERGE` (`false` pauses merge-driven publication),
 `DEV_PUBLISH_ROLE_ARN` and `DEV_DEPLOY_ROLE_ARN` (optional overrides of `lookahead-dev-deploy`).
+
 No cross-repository secret: the deploy workflows read no other repository (the six-role IAM check is
 an Infra concern and runs in Infra workflows only) and the Gateway contract check runs against the
 copy committed in this repository (user decisions 2026-11-01). Actions allow-list:
+
 GitHub-owned plus the pinned `aws-actions/configure-aws-credentials`. Issues enabled. The IAM deploy
 trust must admit the sessions `<app>-deploy-plan-*` and `<app>-deploy-*` (DLV-968 IAM transition).
 
@@ -117,6 +119,14 @@ trust must admit the sessions `<app>-deploy-plan-*` and `<app>-deploy-*` (DLV-96
 Infra's `github/releases/release_version.py`, `github/approvals/issue_template.py` and
 `github/approvals/image_publication.py`; `owner_release.py`, `candidate.py`, `deploy.py`,
 `pipeline_tag.py` and every test are identical across the three app repositories. Update all copies together.
+
+`consumer_contract.py` (Domain and Web only, DLV-968 decision T13) fetches the Gateway/BFF's consumer
+contract `src/test/resources/contracts/domain-api-v1.json` at the Gateway's newest calendar tag (the
+same lightweight-tag selection as `candidate.py infra`, read with `CROSS_REPO_READ_TOKEN`). CI runs it
+before the application build; without the token it prints why it skipped and writes nothing, so a
+local run keeps the committed copy (Domain) or skips the Web path check (Web). Domain's
+`DomainProviderContractTest` checks every listed call against the real controllers; Web's
+`scripts/release/check-gateway-contract.mjs` checks that the built site serves every `webPaths` entry.
 
 
 ```sh
