@@ -136,6 +136,22 @@ class CloudGatewaySecurityIntegrationTest {
         handlers.loginSucceeded(request,response,auth);
         assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in?error=admission");assertThat(session.isInvalid()).isTrue();fixture.server.verify();
     }
+    @Test void failedAdmissionKeepsTheDevGateAdmissionSoTheSignInPageExplains()throws Exception {
+        // DLV-968 (2026-11-02): in DEV the learner rejection must not drop the gate admission, or the browser lands on /dev/access.
+        var session=session(false);var now=java.time.Instant.parse("2026-11-02T08:00:00Z");
+        var admission=new DevAdmission.State("author@lookahead.dev","010b25a0-c0f1-709c-467f-06e036639814",now,now);
+        session.setAttribute(DevAdmission.ATTRIBUTE,admission);
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        var auth=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN));
+        handlers.loginSucceeded(request,response,auth);
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in?error=admission");assertThat(session.isInvalid()).isTrue();
+        var replacement=request.getSession(false);
+        assertThat(replacement).isNotNull().isNotSameAs(session);
+        assertThat(replacement.getAttribute(DevAdmission.ATTRIBUTE)).isEqualTo(admission);
+        assertThat(replacement.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
+        assertThat(replacement.getMaxInactiveInterval()).isEqualTo(8*3600);fixture.server.verify();
+    }
     @Test void challengeAdmissionPreservesSafeDestinationAndNeverReturnsSecrets()throws Exception {
         var session=session(false);session.setAttribute("learningReturnTo","/study-plan?view=week");var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
         var auth=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
