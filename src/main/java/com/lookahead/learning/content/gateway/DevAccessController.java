@@ -14,8 +14,9 @@ public final class DevAccessController {
     public DevAccessController(Environment environment, GatewayController learner) { this.environment = environment; this.learner = learner; }
     private static final DevAccessPage PAGE = DevAccessPage.load(DevAccessPage.RESOURCE);
     @GetMapping(value="/dev/access", produces="text/html")
-    ResponseEntity<String> access() {
-        return ResponseEntity.ok().header("Cache-Control", "no-store").header("Content-Security-Policy", PAGE.policy).body(PAGE.html);
+    ResponseEntity<String> access(@RequestParam(required=false) String access, @RequestParam(required=false) String error) {
+        String body = PAGE.render(SignInProvider.googleEnabled(environment), DevAccessPage.Notice.from(access, error));
+        return ResponseEntity.ok().header("Cache-Control", "no-store").header("Content-Security-Policy", PAGE.policy).body(body);
     }
     @GetMapping("/dev/csrf") ResponseEntity<Map<String,String>> csrf(CsrfToken token) {
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(Map.of("headerName", token.getHeaderName(), "token", token.getToken()));
@@ -38,7 +39,7 @@ public final class DevAccessController {
             if (remaining != null) remaining.invalidate();
             org.springframework.security.core.context.SecurityContextHolder.clearContext();
         }
-        // Log out of the learner provider, then the admission provider. No token travels in a URL.
+        // Log out of the learner provider, which is also the gate's provider since DLV-969. No token travels in a URL.
         String target = environment.getRequiredProperty("app.cognito.managed-login") + "/logout?client_id="
             + encode(environment.getRequiredProperty("app.oauth.client-id")) + "&logout_uri="
             + encode(environment.getRequiredProperty("app.oauth.frontend") + "/dev/leave/complete");
@@ -47,9 +48,7 @@ public final class DevAccessController {
     }
     @GetMapping("/dev/leave/complete") void complete(HttpServletResponse response) throws java.io.IOException {
         response.setHeader("Cache-Control", "no-store");
-        response.sendRedirect(environment.getRequiredProperty("app.admission.managed-login") + "/logout?client_id="
-            + encode(environment.getRequiredProperty("app.admission.client-id")) + "&logout_uri="
-            + encode(environment.getRequiredProperty("app.oauth.frontend") + "/dev/access"));
+        response.sendRedirect("/dev/access");
     }
     private static String encode(String s){return java.net.URLEncoder.encode(s,java.nio.charset.StandardCharsets.UTF_8);}
 }

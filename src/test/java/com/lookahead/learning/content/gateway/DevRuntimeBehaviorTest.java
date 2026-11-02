@@ -24,7 +24,7 @@ class DevRuntimeBehaviorTest {
     @AfterEach void clear(){SecurityContextHolder.clearContext();}
     @Test void idleExpiryRemovesLearnerButKeepsAdmission() throws Exception {
         var request=new MockHttpServletRequest("GET","/learn");
-        request.getSession().setAttribute(DevAdmission.ATTRIBUTE,new DevAdmission.State("tester","admission",now.minusSeconds(2000),now));
+        request.getSession().setAttribute(DevAdmission.ATTRIBUTE,new DevAdmission.State("tester","admission",now.minusSeconds(2000)));
         request.getSession().setAttribute(LearnerIdleFilter.LAST_ACTIVITY,now.minusSeconds(1800));
         SecurityContextHolder.getContext().setAuthentication(auth());
         var old=(MockHttpSession)request.getSession();
@@ -45,15 +45,13 @@ class DevRuntimeBehaviorTest {
     }
     MockEnvironment environment(){return new MockEnvironment().withProperty("app.oauth.frontend","https://dev.example.com")
         .withProperty("app.cognito.managed-login","https://learner.auth.us-east-2.amazoncognito.com")
-        .withProperty("app.oauth.client-id","learner-client")
-        .withProperty("app.admission.managed-login","https://admission.auth.us-east-2.amazoncognito.com")
-        .withProperty("app.admission.client-id","admission-client");}
+        .withProperty("app.oauth.client-id","learner-client");}
     @Test void leaveClearsBothSessionsEvenIfUpstreamSignOutFails() {
         var learner=mock(GatewayController.class);var controller=new DevAccessController(environment(),learner);
         var request=new MockHttpServletRequest("POST","/dev/leave");var response=new MockHttpServletResponse();
         var context=SecurityContextHolder.createEmptyContext();context.setAuthentication(auth());
         var old=(MockHttpSession)request.getSession();old.setAttribute("SPRING_SECURITY_CONTEXT",context);
-        old.setAttribute(DevAdmission.ATTRIBUTE,new DevAdmission.State("tester","admission",now,now));
+        old.setAttribute(DevAdmission.ATTRIBUTE,new DevAdmission.State("tester","admission",now));
         when(learner.logout(any(),any(),any())).thenThrow(new IllegalStateException("synthetic upstream unavailable"));
         var result=controller.leave(request,response);
         verify(learner).logout(request,response,context.getAuthentication());
@@ -62,19 +60,25 @@ class DevRuntimeBehaviorTest {
         assertTrue(result.getBody().get("logoutUrl").contains("learner.auth.us-east-2.amazoncognito.com/logout"));
         assertTrue(result.getBody().get("logoutUrl").contains("%2Fdev%2Fleave%2Fcomplete"));
     }
-    @Test void admissionCompletionUsesSeparateProvider() throws Exception {
+    @Test void leaveCompletionReturnsToTheGateWithoutASecondProvider() throws Exception {
+        // DLV-969: the learner provider is the gate's provider, so nothing is left to log out of after /dev/leave.
         var controller=new DevAccessController(environment(),mock(GatewayController.class));var response=new MockHttpServletResponse();
-        controller.complete(response);assertTrue(response.getRedirectedUrl().startsWith("https://admission.auth.us-east-2.amazoncognito.com/logout?"));
-        assertEquals("no-store",controller.access().getHeaders().getCacheControl());
-        assertFalse(controller.access().getBody().contains("<script"));
+        controller.complete(response);assertEquals("/dev/access",response.getRedirectedUrl());assertEquals("no-store",response.getHeader("Cache-Control"));
+        assertEquals("no-store",controller.access(null,null).getHeaders().getCacheControl());
+        assertFalse(controller.access(null,null).getBody().contains("<script"));
     }
     @Test void accessPageIsSelfContainedAndItsPolicyHashesTheServedStyleBlock() throws Exception {
-        var reply=new DevAccessController(environment(),mock(GatewayController.class)).access();
+        var reply=new DevAccessController(environment(),mock(GatewayController.class)).access(null,null);
         String body=reply.getBody(),policy=reply.getHeaders().getFirst("Content-Security-Policy");
         // The page keeps its purpose and the admission link, and makes no network request of any kind.
         assertTrue(body.startsWith("<!doctype html>"));assertTrue(body.contains("<html lang=\"en\">"));assertTrue(body.contains("<meta name=\"viewport\""));
-        assertTrue(body.contains("Authorized users"));assertTrue(body.contains("href=\"/dev/oauth2/authorization/admission\""));assertTrue(body.contains("Sign in to DEV"));
-        assertTrue(body.contains("aria-describedby=\"signin-hint\""));assertTrue(body.contains("id=\"signin-hint\""));assertTrue(body.contains(" title=\""));
+        assertTrue(body.contains("Authorized users"));assertTrue(body.contains("href=\"/bff/login?provider=password&amp;returnTo=%2F\""));
+        assertTrue(body.contains("Sign in with email and password"));
+        assertTrue(body.contains("One sign-in both opens DEV and signs you in to your account."));assertFalse(body.contains("/dev/oauth2/"));
+        assertTrue(body.contains("aria-describedby=\"signin-hint\""));assertTrue(body.contains("id=\"signin-hint\""));
+        // Google is off until the pool has the provider; the served page carries no template marks and no notice.
+        assertFalse(body.contains("Continue with Google"));assertFalse(body.contains("provider=google"));assertFalse(body.contains("<!--"));
+        assertFalse(body.contains("class=\"notice\""));
         assertFalse(body.contains("<script"));assertFalse(body.contains("http://"));assertFalse(body.contains("https://"));
         assertFalse(body.contains("<link"));assertFalse(body.contains("<img"));assertFalse(body.contains("@import"));assertFalse(body.contains("url("));
         assertFalse(body.contains(" style=\""));assertEquals(body.indexOf("<style"),body.lastIndexOf("<style"));
@@ -88,6 +92,28 @@ class DevRuntimeBehaviorTest {
         assertThrows(IllegalStateException.class,()->DevAccessPage.styleHash("<html><body>no style</body></html>"));
         assertThrows(IllegalStateException.class,()->DevAccessPage.styleHash("<style>a</style><style>b</style>"));
         assertThrows(IllegalStateException.class,()->DevAccessPage.load("dev-access-missing.html"));
+    }
+    /** DLV-969: the gate page is our sign-in page; Google appears only while the switch is on. */
+    @Test void accessPageOffersGoogleOnlyWhenSwitchedOn() {
+        var on=new DevAccessController(environment().withProperty("app.cognito.google-sign-in","true"),mock(GatewayController.class)).access(null,null);
+        String body=on.getBody();
+        assertTrue(body.contains("href=\"/bff/login?provider=google&amp;returnTo=%2F\""));assertTrue(body.contains("Continue with Google"));
+        assertTrue(body.indexOf("Continue with Google")<body.indexOf("Sign in with email and password"));
+        assertTrue(body.contains("<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\""));assertFalse(body.contains("<!--"));
+        // The style block, and so the policy hash, is the same with or without Google.
+        var off=new DevAccessController(environment(),mock(GatewayController.class)).access(null,null);
+        assertEquals(off.getHeaders().getFirst("Content-Security-Policy"),on.getHeaders().getFirst("Content-Security-Policy"));
+    }
+    @Test void accessPageShowsOnlyFixedNotices() {
+        var controller=new DevAccessController(environment(),mock(GatewayController.class));
+        String pending=controller.access("pending",null).getBody();
+        assertTrue(pending.contains("<p class=\"notice\" role=\"status\">Your sign-in worked. The owner has to approve your access before DEV opens."));
+        String failed=controller.access(null,"<b>anything</b>").getBody();
+        assertTrue(failed.contains("That sign-in did not complete. Try again."));assertFalse(failed.contains("<b>anything"));
+        assertFalse(controller.access("other",null).getBody().contains("class=\"notice\""));
+        assertEquals(DevAccessPage.Notice.PENDING,DevAccessPage.Notice.from("pending","signin"));
+        assertThrows(IllegalStateException.class,()->new DevAccessPage("<style>a</style><p>no marks</p>").render(false,DevAccessPage.Notice.NONE));
+        assertThrows(IllegalStateException.class,()->new DevAccessPage("<style>a</style><!--notice--><!--/google--><!--google-->").render(true,DevAccessPage.Notice.NONE));
     }
     MockEnvironment upstreams(){return new MockEnvironment().withProperty("app.oauth.domain-api-upstream","https://domain.lookahead-dev.internal:8443")
         .withProperty("app.gateway.web-upstream","https://web.lookahead-dev.internal:8443");}
@@ -115,19 +141,35 @@ class DevRuntimeBehaviorTest {
         doThrow(new IllegalStateException()).when(client).getItem(any(java.util.function.Consumer.class));
         var controller=new DevSessionStatus(client,"state");assertEquals(503,controller.status().getStatusCode().value());controller.close();verify(client).close();
     }
-    @Test void directoryRequiresEnabledUserAndMatchingSubject() {
-        var client=mock(software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient.class);
+    org.springframework.security.oauth2.core.oidc.user.OidcUser signedIn(Map<String,Object> claims){
+        var all=new HashMap<String,Object>(Map.of("sub","010b25a0-c0f1-709c-467f-06e036639814"));all.putAll(claims);
+        var token=new org.springframework.security.oauth2.core.oidc.OidcIdToken("synthetic-id-token",now.minusSeconds(5),now.plusSeconds(3600),all);
+        return new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(List.of(new SimpleGrantedAuthority("ROLE_USER")),token);
+    }
+    @Test void gateOpensOnAFreshLookAheadSignInWithUsernameOrSubject() {
+        // DLV-969: no directory call; the ID token's auth_time must be at most 120 s old and at most 30 s ahead.
+        var gate=DevGate.freshSignIn(Clock.fixed(now,ZoneOffset.UTC));
+        var request=new MockHttpServletRequest("GET","/login/oauth2/code/lookahead");request.getSession().setAttribute("SPRING_SECURITY_CONTEXT","learner");
+        gate.admit(request,signedIn(Map.of("cognito:username","author@lookahead.dev","auth_time",now.minusSeconds(120))));
+        assertEquals(new DevAdmission.State("author@lookahead.dev","010b25a0-c0f1-709c-467f-06e036639814",now),request.getSession().getAttribute(DevAdmission.ATTRIBUTE));
+        assertEquals("learner",request.getSession().getAttribute("SPRING_SECURITY_CONTEXT"));assertEquals(8*3600,request.getSession().getMaxInactiveInterval());
+        var federated=new MockHttpServletRequest("GET","/login/oauth2/code/lookahead");
+        gate.admit(federated,signedIn(Map.of("auth_time",now.plusSeconds(30))));
+        assertEquals(new DevAdmission.State("010b25a0-c0f1-709c-467f-06e036639814","010b25a0-c0f1-709c-467f-06e036639814",now),federated.getSession().getAttribute(DevAdmission.ATTRIBUTE));
+    }
+    @Test void gateRefusesAStaleFutureOrMissingAuthTime() {
+        var gate=DevGate.freshSignIn(Clock.fixed(now,ZoneOffset.UTC));
+        for(Map<String,Object> claims:List.<Map<String,Object>>of(Map.of("auth_time",now.minusSeconds(121)),Map.of("auth_time",now.plusSeconds(31)),Map.of())){
+            var request=new MockHttpServletRequest("GET","/login/oauth2/code/lookahead");
+            assertThrows(IllegalStateException.class,()->gate.admit(request,signedIn(claims)),claims.toString());
+            assertNull(request.getSession(false),claims.toString());
+        }
+    }
+    @Test void gateConfigurationIsDevOnlyAndRegistersTheFilterAheadOfSecurity() {
         var config=new DevAdmissionConfiguration();
-        var directory=config.admissionDirectory(client,new MockEnvironment().withProperty("app.admission.pool-id","us-east-2_test"));
-        var enabled=software.amazon.awssdk.services.cognitoidentityprovider.model.AdminGetUserResponse.builder().enabled(true)
-            .userAttributes(software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType.builder().name("sub").value("expected").build()).build();
-        doReturn(enabled).when(client).adminGetUser(any(java.util.function.Consumer.class));
-        assertTrue(directory.enabled("tester","expected"));assertFalse(directory.enabled("tester","other"));
-        doReturn(enabled.toBuilder().enabled(false).build()).when(client).adminGetUser(any(java.util.function.Consumer.class));
-        assertFalse(directory.enabled("tester","expected"));
-        doThrow(software.amazon.awssdk.services.cognitoidentityprovider.model.UserNotFoundException.builder().message("missing").build())
-            .when(client).adminGetUser(any(java.util.function.Consumer.class));
-        assertFalse(directory.enabled("tester","expected"));
+        assertThrows(IllegalStateException.class,()->config.devGate(new MockEnvironment().withProperty("app.deployment-environment","prod")));
+        assertNotNull(config.devGate(new MockEnvironment().withProperty("app.deployment-environment","dev")));
+        var registration=config.admissionFilter();assertEquals(-110,registration.getOrder());assertInstanceOf(DevAdmission.class,registration.getFilter());
     }
     @Test void statusShowsWarningAndMaintenanceWithoutPrivateOperationId() {
         var client=mock(software.amazon.awssdk.services.dynamodb.DynamoDbClient.class);

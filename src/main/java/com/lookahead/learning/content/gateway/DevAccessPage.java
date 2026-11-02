@@ -14,6 +14,27 @@ final class DevAccessPage {
         this.html = html;
         this.policy = BASE_POLICY + "; style-src 'sha256-" + styleHash(html) + "'";
     }
+    /** A short server-chosen message above the buttons; the page carries no script, so the server picks it (DLV-969). */
+    enum Notice {
+        NONE(""),
+        PENDING("Your sign-in worked. The owner has to approve your access before DEV opens. Sign in again once you hear back."),
+        FAILED("That sign-in did not complete. Try again.");
+        final String text;
+        Notice(String text) { this.text = text; }
+        static Notice from(String access, String error) {
+            if ("pending".equals(access)) return PENDING;
+            return error == null ? NONE : FAILED;
+        }
+    }
+    static final String NOTICE_MARK = "<!--notice-->", GOOGLE_START = "<!--google-->", GOOGLE_END = "<!--/google-->";
+    /** The served page: the Google button only while the pool has Google; the notice from fixed text only, never request input. */
+    String render(boolean google, Notice notice) {
+        int start = html.indexOf(GOOGLE_START), end = html.indexOf(GOOGLE_END);
+        if (start < 0 || end < start || html.indexOf(NOTICE_MARK) < 0) throw new IllegalStateException("The page must carry the notice and Google marks");
+        String page = google ? html.replace(GOOGLE_START, "").replace(GOOGLE_END, "")
+            : html.substring(0, start) + html.substring(end + GOOGLE_END.length());
+        return page.replace(NOTICE_MARK, notice == Notice.NONE ? "" : "<p class=\"notice\" role=\"status\">" + notice.text + "</p>");
+    }
     static DevAccessPage load(String resource) {
         try (InputStream in = DevAccessPage.class.getClassLoader().getResourceAsStream(resource)) {
             if (in == null) throw new IllegalStateException("Missing classpath resource " + resource);

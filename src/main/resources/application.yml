@@ -44,6 +44,8 @@ app:
     issuer: ${LOOKAHEAD_COGNITO_ISSUER:}
     managed-login: ${LOOKAHEAD_COGNITO_MANAGED_LOGIN:}
     scope-prefix: ${LOOKAHEAD_COGNITO_SCOPE_PREFIX:}
+    # DLV-969: true only after the Look Ahead pool has the Google provider; shows the Google button and allows provider=google.
+    google-sign-in: ${LOOKAHEAD_GOOGLE_SIGN_IN:false}
     gateway-secret: ${LOOKAHEAD_DOMAIN_GATEWAY_SECRET:}
   gateway:
     identity-cookie-name: ${LOOKAHEAD_IDENTITY_COOKIE_NAME:LOOKAHEAD_SESSION}

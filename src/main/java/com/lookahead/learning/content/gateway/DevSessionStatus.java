@@ -17,7 +17,7 @@ public final class DevSessionStatus implements AutoCloseable {
     @org.springframework.beans.factory.annotation.Autowired
     public DevSessionStatus(Environment env){
         table=env.getRequiredProperty("app.dev-session.table");
-        client=DynamoDbClient.builder().region(software.amazon.awssdk.regions.Region.of(env.getRequiredProperty("app.admission.region")))
+        client=DynamoDbClient.builder().region(software.amazon.awssdk.regions.Region.of(env.getRequiredProperty("app.dev-session.region")))
             .credentialsProvider(ContainerCredentialsProvider.builder().build())
             .httpClientBuilder(UrlConnectionHttpClient.builder().connectionTimeout(Duration.ofSeconds(2)).socketTimeout(Duration.ofSeconds(3)))
             .overrideConfiguration(c->c.apiCallTimeout(Duration.ofSeconds(4)).apiCallAttemptTimeout(Duration.ofSeconds(3))).build();
