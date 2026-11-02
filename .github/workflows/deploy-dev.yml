@@ -150,7 +150,7 @@
         },
         {
           "name": "Retain the deploy plan",
-          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
           "with": {
             "name": "deploy-plan",
             "path": "${{ runner.temp }}/deploy-plan/",
@@ -212,7 +212,7 @@
         },
         {
           "name": "Retain the approval receipt",
-          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
           "with": {
             "name": "deploy-approval",
             "path": "${{ runner.temp }}/deploy-approval/",
@@ -305,7 +305,7 @@
         {
           "name": "Retain the deploy result whatever the outcome",
           "if": "always()",
-          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
           "with": {
             "name": "deploy-result",
             "path": "${{ runner.temp }}/deploy-result/",
@@ -351,7 +351,7 @@
         },
         {
           "name": "Retain one record per deploy run",
-          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
           "with": {
             "name": "deploy-record-${{ inputs.release_version }}-${{ github.run_id }}",
             "path": "${{ runner.temp }}/deploy-record/",
