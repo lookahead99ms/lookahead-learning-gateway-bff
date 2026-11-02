@@ -67,19 +67,26 @@ class DevRuntimeBehaviorTest {
         assertEquals("no-store",controller.access().getHeaders().getCacheControl());
         assertFalse(controller.access().getBody().contains("<script"));
     }
+    MockEnvironment upstreams(){return new MockEnvironment().withProperty("app.oauth.domain-api-upstream","https://domain.lookahead-dev.internal:8443")
+        .withProperty("app.gateway.web-upstream","https://web.lookahead-dev.internal:8443");}
     @Test void webProxyForwardsNoBrowserCredentialsOrQueries() {
         var builder=RestClient.builder();var server=MockRestServiceServer.bindTo(builder).build();
-        server.expect(requestTo("https://web-blue.lookahead-dev.internal:8443/learn"))
+        server.expect(requestTo("https://web.lookahead-dev.internal:8443/learn"))
             .andExpect(headerDoesNotExist("Authorization")).andExpect(headerDoesNotExist("Cookie"))
             .andRespond(withSuccess("<html>shell</html>",MediaType.TEXT_HTML));
         var request=new MockHttpServletRequest("GET","/learn");request.setQueryString("token=private");request.addHeader("Authorization","Bearer private");request.addHeader("Cookie","session=private");
-        var result=new DevWebProxy(builder.build(),"blue").get(request);assertEquals(200,result.getStatusCode().value());assertEquals("no-store",result.getHeaders().getCacheControl());server.verify();
+        var result=new DevWebProxy(builder.build(),upstreams()).get(request);assertEquals(200,result.getStatusCode().value());assertEquals("no-store",result.getHeaders().getCacheControl());server.verify();
     }
     @Test void webProxyRefusesRedirectAndReservedRoutes() {
         var builder=RestClient.builder();var server=MockRestServiceServer.bindTo(builder).build();
-        server.expect(requestTo("https://web-blue.lookahead-dev.internal:8443/learn")).andRespond(withStatus(org.springframework.http.HttpStatus.FOUND).header("Location","https://elsewhere.example"));
-        var proxy=new DevWebProxy(builder.build(),"blue");assertEquals(502,proxy.get(new MockHttpServletRequest("GET","/learn")).getStatusCode().value());
+        server.expect(requestTo("https://web.lookahead-dev.internal:8443/learn")).andRespond(withStatus(org.springframework.http.HttpStatus.FOUND).header("Location","https://elsewhere.example"));
+        var proxy=new DevWebProxy(builder.build(),upstreams());assertEquals(502,proxy.get(new MockHttpServletRequest("GET","/learn")).getStatusCode().value());
         assertEquals(404,proxy.get(new MockHttpServletRequest("GET","/content/private")).getStatusCode().value());server.verify();
+    }
+    @Test void webProxyRefusesAnyWebUpstreamOtherThanTheStableName() {
+        for(String rejected:List.of("https://web.attacker.test:8443","https://web.lookahead-dev.internal:8081","http://web.lookahead-dev.internal:8443"))
+            assertThrows(IllegalStateException.class,()->new DevWebProxy(RestClient.builder().build(),upstreams().withProperty("app.gateway.web-upstream",rejected)),rejected);
+        assertThrows(IllegalStateException.class,()->new DevWebProxy(RestClient.builder().build(),new MockEnvironment()));
     }
     @Test void unavailableStatusNeverInventsADeadline() {
         var client=mock(software.amazon.awssdk.services.dynamodb.DynamoDbClient.class);

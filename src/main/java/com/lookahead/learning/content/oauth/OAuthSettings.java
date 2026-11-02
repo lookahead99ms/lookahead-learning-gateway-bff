@@ -48,10 +48,10 @@ public record OAuthSettings(String issuer, String clientId, String clientSecret,
             String domain = required(properties.domainApiUpstream());
             if ("application-mtls".equals(domainTransport)) {
                 if (!"dev".equals(mode) || !environment.acceptsProfiles(org.springframework.core.env.Profiles.of("lower-cost-dev"))
-                        || !DevServiceOrigins.forSlot(environment.getProperty("LOOKAHEAD_RELEASE_SLOT")).domain().equals(domain)
+                        || !DevServiceOrigins.from(environment).domain().equals(domain)
                         || !environment.getProperty("server.ssl.enabled", Boolean.class, false)
                         || !"serving".equals(environment.getProperty("server.ssl.bundle")))
-                    throw new IllegalStateException("Application mTLS requires the explicit DEV TLS profile and exact Domain origin");
+                    throw new IllegalStateException("Application mTLS requires the explicit DEV TLS profile and the stable Domain and Web origins");
             } else if ("service-connect-tls".equals(domainTransport)) {
                 // The selected ECS client alias routes through its local Service Connect proxy.
                 // Infra must require TLS for the inter-task hop; this is not a general HTTP exception.

@@ -17,6 +17,9 @@ app:
   oauth:
     domain-transport: application-mtls
     domain-api-upstream: ${LOOKAHEAD_DOMAIN_UPSTREAM}
+  gateway:
+    # DLV-968 S3: the stable Web upstream the DevWebProxy forwards safe GET/HEAD paths to.
+    web-upstream: ${LOOKAHEAD_WEB_UPSTREAM}
   admission:
     region: ${AWS_REGION}
     pool-id: ${LOOKAHEAD_ADMISSION_POOL_ID}

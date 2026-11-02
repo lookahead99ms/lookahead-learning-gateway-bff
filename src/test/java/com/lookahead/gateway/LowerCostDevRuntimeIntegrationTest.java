@@ -91,8 +91,9 @@ class LowerCostDevRuntimeIntegrationTest {
         env.put("LOOKAHEAD_DEV_STATE_TABLE", "lookahead-dev-operations");
         env.put("LOOKAHEAD_ADMISSION_POOL_ID", "us-east-2_Admission1");
         env.put("LOOKAHEAD_ADMISSION_MANAGED_LOGIN", "https://admission-example.auth.us-east-2.amazoncognito.com");
-        env.put("LOOKAHEAD_DOMAIN_UPSTREAM", "https://domain-blue.lookahead-dev.internal:8443");
-        env.put("LOOKAHEAD_RELEASE_SLOT", "blue"); env.put("LOOKAHEAD_DOMAIN_TRANSPORT", "application-mtls");
+        env.put("LOOKAHEAD_DOMAIN_UPSTREAM", "https://domain.lookahead-dev.internal:8443");
+        env.put("LOOKAHEAD_WEB_UPSTREAM", "https://web.lookahead-dev.internal:8443");
+        env.put("LOOKAHEAD_DOMAIN_TRANSPORT", "application-mtls");
         env.put("APP_AUTHOR_PREVIEWS_ENABLED", "false");
         env.put("LOOKAHEAD_TLS_SCHEMA", "lookahead-tls/v1");
         env.put("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("server.pem")); env.put("LOOKAHEAD_TLS_SERVER_KEY", text("server.key"));
@@ -178,6 +179,14 @@ class LowerCostDevRuntimeIntegrationTest {
         var csrf = call("GET", base + "/dev/csrf", Map.of());
         assertEquals(200, csrf.status()); assertTrue(csrf.body().contains("\"headerName\":\"X-CSRF-TOKEN\""));
         assertEquals(403, call("POST", base + "/dev/leave", Map.of()).status());
+    }
+
+    @Test void slotUpstreamOrMissingWebUpstreamDeniesStartup() throws Exception {
+        // DLV-968 S3: the task definition names both stable upstreams; a release slot variable is no longer read.
+        var noWeb = taskDefinition(); noWeb.remove("LOOKAHEAD_WEB_UPSTREAM"); noWeb.put("LOOKAHEAD_RELEASE_SLOT", "blue");
+        assertThrows(Exception.class, () -> start(noWeb));
+        var foreign = taskDefinition(); foreign.put("LOOKAHEAD_DOMAIN_UPSTREAM", "https://domain.attacker.test:8443");
+        assertThrows(Exception.class, () -> start(foreign));
     }
 
     @Test void missingInjectedCredentialDeniesStartupWithoutLeakingValues() throws Exception {

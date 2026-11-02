@@ -1,23 +1,17 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "DLV-968: one DEV gateway slot owned by the gateway-bff repository: ECS task definition lookahead-dev-gateway-<Slot> and ECS service lookahead-dev-gateway-<Slot> on the existing cluster, network, log group, credentials and IAM roles; nothing else is created.",
+  "Description": "DLV-968: the DEV gateway application, one ECS service with rolling updates, owned by the gateway-bff repository: task definition family lookahead-dev-gateway and ECS service lookahead-dev-gateway on the existing cluster, network, log group, credentials and IAM roles; nothing else is created. The service registers in the existing NLB target group lookahead-dev-gateway-blue (TargetGroupArn, decision V); the green group leaves with the ingress stack in phase 3.",
   "Metadata": {
     "Owner": "lookahead99ms/lookahead-learning-gateway-bff",
     "Ticket": "DLV-968",
     "Resources": [
-      "AWS::ECS::TaskDefinition lookahead-dev-gateway-<Slot>",
-      "AWS::ECS::Service lookahead-dev-gateway-<Slot>"
+      "AWS::ECS::TaskDefinition lookahead-dev-gateway",
+      "AWS::ECS::Service lookahead-dev-gateway"
     ],
-    "Deploy": "tools/release/deploy.py renders change sets app-<run>-candidate / -retire against this template; DesiredCount is 1 for the serving or candidate slot and 0 for the retired slot"
+    "Deploy": "tools/release/deploy.py renders one change set app-<run> against this template; a deploy is an ECS rolling update (surge to two tasks, circuit-breaker rollback); DesiredCount 1 serves, 0 parks the service (user decision V, 2026-11-01)",
+    "HealthCheck": "Spring Boot starts in 75-90 s on 512 CPU units; a 60 s start period with 3 retries killed healthy tasks (Domain run 41327104117, 2026-11-01), so the grace is 180 s plus 5 retries."
   },
   "Parameters": {
-    "Slot": {
-      "Type": "String",
-      "AllowedValues": [
-        "blue",
-        "green"
-      ]
-    },
     "Cluster": {
       "Type": "String"
     },
@@ -120,9 +114,7 @@
     "Task": {
       "Type": "AWS::ECS::TaskDefinition",
       "Properties": {
-        "Family": {
-          "Fn::Sub": "lookahead-dev-gateway-${Slot}"
-        },
+        "Family": "lookahead-dev-gateway",
         "RequiresCompatibilities": [
           "FARGATE"
         ],
@@ -175,7 +167,7 @@
               }
             },
             "Essential": true,
-            "StartTimeout": 120,
+            "StartTimeout": 180,
             "PortMappings": [
               {
                 "ContainerPort": 8443,
@@ -330,15 +322,11 @@
               },
               {
                 "Name": "LOOKAHEAD_DOMAIN_UPSTREAM",
-                "Value": {
-                  "Fn::Sub": "https://domain-${Slot}.lookahead-dev.internal:8443"
-                }
+                "Value": "https://domain.lookahead-dev.internal:8443"
               },
               {
-                "Name": "LOOKAHEAD_RELEASE_SLOT",
-                "Value": {
-                  "Ref": "Slot"
-                }
+                "Name": "LOOKAHEAD_WEB_UPSTREAM",
+                "Value": "https://web.lookahead-dev.internal:8443"
               },
               {
                 "Name": "LOOKAHEAD_DOMAIN_TRANSPORT",
@@ -361,8 +349,8 @@
               ],
               "Interval": 15,
               "Timeout": 5,
-              "Retries": 3,
-              "StartPeriod": 60
+              "Retries": 5,
+              "StartPeriod": 180
             }
           }
         ],
@@ -379,9 +367,7 @@
     "Service": {
       "Type": "AWS::ECS::Service",
       "Properties": {
-        "ServiceName": {
-          "Fn::Sub": "lookahead-dev-gateway-${Slot}"
-        },
+        "ServiceName": "lookahead-dev-gateway",
         "Cluster": {
           "Ref": "Cluster"
         },
@@ -399,7 +385,7 @@
           "MaximumPercent": 200,
           "DeploymentCircuitBreaker": {
             "Enable": true,
-            "Rollback": false
+            "Rollback": true
           }
         },
         "NetworkConfiguration": {
