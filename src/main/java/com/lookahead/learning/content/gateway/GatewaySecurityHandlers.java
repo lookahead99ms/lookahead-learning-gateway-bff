@@ -50,8 +50,9 @@ public class GatewaySecurityHandlers {
                 if(admission.data().path("signInId").asString("").isEmpty())throw new IllegalStateException("Missing admission");
                 session.removeAttribute(CloudGatewaySessions.CHALLENGE);
             } catch(RuntimeException rejected) {
-                clients.removeAuthorizedClient("lookahead",authentication,request,response);session.invalidate();
-                org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                // End the learner sign-in but keep the DEV gate admission (if any), so the person lands on the sign-in page's
+                // explanation instead of back at the gate (DLV-968, 2026-11-02).
+                clients.removeAuthorizedClient("lookahead",authentication,request,response);DevAdmission.clearLearner(request);
                 response.sendRedirect(settings.frontend()+"/sign-in?error=admission");return;
             }
         }
