@@ -73,7 +73,7 @@ class DevRuntimeBehaviorTest {
         String body=reply.getBody(),policy=reply.getHeaders().getFirst("Content-Security-Policy");
         // The page keeps its purpose and the admission link, and makes no network request of any kind.
         assertTrue(body.startsWith("<!doctype html>"));assertTrue(body.contains("<html lang=\"en\">"));assertTrue(body.contains("<meta name=\"viewport\""));
-        assertTrue(body.contains("Authorized testers"));assertTrue(body.contains("href=\"/dev/oauth2/authorization/admission\""));assertTrue(body.contains("Sign in to DEV"));
+        assertTrue(body.contains("Authorized users"));assertTrue(body.contains("href=\"/dev/oauth2/authorization/admission\""));assertTrue(body.contains("Sign in to DEV"));
         assertTrue(body.contains("aria-describedby=\"signin-hint\""));assertTrue(body.contains("id=\"signin-hint\""));assertTrue(body.contains(" title=\""));
         assertFalse(body.contains("<script"));assertFalse(body.contains("http://"));assertFalse(body.contains("https://"));
         assertFalse(body.contains("<link"));assertFalse(body.contains("<img"));assertFalse(body.contains("@import"));assertFalse(body.contains("url("));
