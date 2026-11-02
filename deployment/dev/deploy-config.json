@@ -1,5 +1,5 @@
 {
-  "schema": "lookahead-app-deploy-config/v1",
+  "schema": "lookahead-app-deploy-config/v2",
   "app": "gateway-bff",
   "service": "gateway",
   "account": "509614632283",
@@ -10,30 +10,11 @@
   "sessionPrefix": "gateway-deploy",
   "cluster": "arn:aws:ecs:us-east-2:509614632283:cluster/lookahead-dev-cluster",
   "clusterName": "lookahead-dev-cluster",
+  "stack": "lookahead-dev-gateway",
   "logGroup": "/lookahead/dev/gateway",
   "namespaceName": "lookahead-dev.internal",
-  "slots": {
-    "blue": {
-      "stack": "lookahead-dev-gateway-blue",
-      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-2:509614632283:targetgroup/lookahead-dev-gateway-blue/91715c2a9b4ca9d7"
-    },
-    "green": {
-      "stack": "lookahead-dev-gateway-green",
-      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-2:509614632283:targetgroup/lookahead-dev-gateway-green/a2207b41954b822a"
-    }
-  },
-  "flip": {
-    "mode": "listener",
-    "listenerStack": "lookahead-dev-ingress",
-    "note": "Change set app-<run>-flip sets ActiveSlot on the listener stack (lookahead-dev-edge after phase 3) with the previous template; every other parameter keeps its value and tags are untouched. The NLB listener 443 then forwards to the candidate target group."
-  },
-  "coupling": {
-    "requiresSameSlot": [
-      "lookahead-dev-web-",
-      "lookahead-dev-domain-"
-    ],
-    "note": "Phase 1: the Gateway derives web-<slot> and domain-<slot> from its own slot, so both must already run in the candidate slot (removed in phase 2, DLV-968 T12)."
-  },
+  "discovery": null,
+  "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-2:509614632283:targetgroup/lookahead-dev-gateway-blue/91715c2a9b4ca9d7",
   "observationMinutes": 15,
   "probeUrl": "https://dev.devlookahead.com/",
   "parameters": {
@@ -57,10 +38,8 @@
     "ApplicationManagedLogin": "https://lookahead-dev-application-login.auth.us-east-2.amazoncognito.com",
     "AdmissionPoolId": "us-east-2_giwDiRKqs",
     "AdmissionManagedLogin": "https://lookahead-dev-admission-login.auth.us-east-2.amazoncognito.com",
-    "DevStateTable": "lookahead-dev-operations"
-  },
-  "slotParameters": {
-    "TargetGroupArn": "targetGroupArn"
+    "DevStateTable": "lookahead-dev-operations",
+    "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-2:509614632283:targetgroup/lookahead-dev-gateway-blue/91715c2a9b4ca9d7"
   },
   "logFailurePatterns": [
     "ERROR",

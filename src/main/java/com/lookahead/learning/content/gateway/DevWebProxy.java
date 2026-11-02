@@ -11,8 +11,9 @@ import org.springframework.web.client.RestClient;
 public final class DevWebProxy {
     private final RestClient http;
     private final String origin;
-    public DevWebProxy(RestClient http, @org.springframework.beans.factory.annotation.Value("${LOOKAHEAD_RELEASE_SLOT}") String slot) {
-        this.http = http; this.origin = com.lookahead.learning.content.oauth.DevServiceOrigins.forSlot(slot).web();
+    public DevWebProxy(RestClient http, org.springframework.core.env.Environment environment) {
+        // LOOKAHEAD_WEB_UPSTREAM, validated against the stable Web name (DLV-968 S3).
+        this.http = http; this.origin = com.lookahead.learning.content.oauth.DevServiceOrigins.from(environment).web();
     }
     @RequestMapping(value="/**", method={RequestMethod.GET, RequestMethod.HEAD})
     ResponseEntity<byte[]> get(HttpServletRequest request) {

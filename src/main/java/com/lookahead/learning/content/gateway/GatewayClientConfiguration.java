@@ -70,8 +70,9 @@ public class GatewayClientConfiguration {
                 .followRedirects(java.net.http.HttpClient.Redirect.NEVER).build();
         var internalRequests = new JdkClientHttpRequestFactory(client);
         internalRequests.setReadTimeout(properties.readTimeout());
-        var origins = com.lookahead.learning.content.oauth.DevServiceOrigins.forSlot(environment.getProperty("LOOKAHEAD_RELEASE_SLOT"));
-        // Never send the internal client certificate to Cognito, another slot or other public providers.
+        var origins = com.lookahead.learning.content.oauth.DevServiceOrigins.from(environment);
+        // Never send the internal client certificate to Cognito, any host other than the two configured
+        // upstreams, or other public providers; the TLS layer then verifies the upstream leaf's name.
         return RestClient.builder().requestFactory((uri, method) -> {
             boolean internal = origins.internal(uri);
             if (internal && (!"https".equals(uri.getScheme()) || uri.getPort() != 8443))

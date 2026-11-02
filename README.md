@@ -113,7 +113,8 @@ owns network, database and service orchestration; it consumes the built image.
 | `APP_OAUTH_CLIENT_ID` | Dedicated client registered with Identity |
 | `LOOKAHEAD_GATEWAY_CLIENT_SECRET` | Client secret shared only with Identity |
 | `LOOKAHEAD_IDENTITY_UPSTREAM` | Fixed Identity origin |
-| `LOOKAHEAD_DOMAIN_UPSTREAM` | Fixed Domain API origin |
+| `LOOKAHEAD_DOMAIN_UPSTREAM` | Fixed Domain API origin; lower-cost DEV accepts exactly `https://domain.lookahead-dev.internal:8443` |
+| `LOOKAHEAD_WEB_UPSTREAM` | Lower-cost DEV only: fixed Web origin for the static-shell proxy, exactly `https://web.lookahead-dev.internal:8443` |
 | `LOOKAHEAD_DOMAIN_TRANSPORT` | `https` default, or explicit cloud-only `service-connect-tls` with exact `http://domain:8080` alias |
 | `LOOKAHEAD_SECRETS_DIRECTORY` | Optional config-tree directory, defaults to `/run/secrets/` |
 | `LOOKAHEAD_GATEWAY_COOKIE_NAME`, `LOOKAHEAD_IDENTITY_COOKIE_NAME` | Distinct environment-specific session-cookie names |
@@ -424,24 +425,40 @@ It is locally implemented, not deployed. Infra owns the candidate templates,
 finite runtime jobs and `docs/deployment/lower-cost-dev-session-runbook.md`.
 Provider login, negative AWS reachability and complete cutover tests remain pending.
 
-### Isolated DEV release slots
+### Stable DEV upstreams (DLV-968 S3, November 1, 2026)
 
-The lower-cost DEV profile requires `LOOKAHEAD_RELEASE_SLOT=blue|green`.
-Gateway verifies and connects only to that slot's Web/Domain private DNS origins
-(`web-{slot}.lookahead-dev.internal`, `domain-{slot}.lookahead-dev.internal`, TLS
-8443). `LOOKAHEAD_DOMAIN_UPSTREAM` must agree with the selected slot. The client
-certificate is restricted to these internal destinations; public OAuth connections
-use the public trust context. A slot change loses in-memory sessions and requires
-sign-in again. See Infra's `docs/deployment/lower-cost-dev-release-slots.md` for
-candidate gates, guarded cutover and operator-approved rollback.
+One service per application: the lower-cost DEV profile reaches Domain and Web by
+their stable private DNS names, configured explicitly by the task definition as
+`LOOKAHEAD_DOMAIN_UPSTREAM=https://domain.lookahead-dev.internal:8443` and
+`LOOKAHEAD_WEB_UPSTREAM=https://web.lookahead-dev.internal:8443`. Startup validation
+(`DevServiceOrigins`) accepts exactly these two values: any other host, port, scheme
+or path denies startup, and the Web value is never accepted as the Domain upstream
+or vice versa. The internal client certificate is sent only to these two hosts over
+HTTPS 8443; public OAuth connections use the public trust context, and the TLS
+hostname check verifies each upstream leaf against the injected internal trust.
+`LOOKAHEAD_RELEASE_SLOT` is no longer read. Transition only: the retired
+`domain-blue|green` / `web-blue|green` names stay accepted until S5 removes the slot
+services (dated comment in `DevServiceOrigins`). The earlier blue/green slot model is
+described in Infra's `docs/deployment/lower-cost-dev-release-slots.md`.
+
+Deployment (DLV-968 decision V, November 1, 2026): `deployment/dev/service.template.json` and
+`deployment/dev/deploy-config.json` describe one ECS service `lookahead-dev-gateway` (task definition family
+of the same name) on the stack `lookahead-dev-gateway`; `04 · Deploy DEV` (`tools/release/deploy.py`, see
+`tools/release/README.md`) renders one change set per run and ECS performs a rolling update with
+circuit-breaker rollback; `desired_count` 1 serves, 0 parks the service. The single service registers in
+the existing NLB target group `lookahead-dev-gateway-blue` (`TargetGroupArn` in the deploy configuration):
+the ingress listener stays on its blue target group, and the unused green group is removed together with
+the ingress stack in phase 3. The container start grace is 180 s with five health-check retries (Spring
+Boot needs 75-90 s on 512 CPU units; a 60 s grace killed healthy tasks on November 1, 2026).
 
 ### DEV activation preparation (DLV-914, October 30, 2026)
 
 The DEV task definition Infra generates for this application (`aws/compute/lower_cost_dev_workloads.py`,
 written to `aws/ingress/templates/dev/gateway.template.json`) runs the image with
 `SPRING_PROFILES_ACTIVE=lower-cost-dev`, `LOOKAHEAD_ENVIRONMENT=dev`, `LOOKAHEAD_RUNTIME_MODE=lower-cost-dev`,
-`LOOKAHEAD_DOMAIN_TRANSPORT=application-mtls`, `LOOKAHEAD_RELEASE_SLOT=blue|green`,
-`LOOKAHEAD_DOMAIN_UPSTREAM=https://domain-<slot>.lookahead-dev.internal:8443`, the public hostname as
+`LOOKAHEAD_DOMAIN_TRANSPORT=application-mtls`, `LOOKAHEAD_RELEASE_SLOT=blue|green` and
+`LOOKAHEAD_DOMAIN_UPSTREAM=https://domain-<slot>.lookahead-dev.internal:8443` (both replaced on November 1, 2026
+by the stable upstreams above), the public hostname as
 `LOOKAHEAD_TLS_SERVER_NAME` and `LOOKAHEAD_FRONTEND_ORIGIN=https://<hostname>`, the application pool issuer,
 managed-login origin and scope prefix, the admission pool ID and managed-login origin, the operations table
 name in `LOOKAHEAD_DEV_STATE_TABLE`, `AWS_REGION`, and `JAVA_TOOL_OPTIONS` pointing at
