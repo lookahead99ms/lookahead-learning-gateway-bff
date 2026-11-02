@@ -10,6 +10,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.web.client.RestClient;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.http.MediaType;
+import java.security.MessageDigest;
 import java.time.*;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -66,6 +67,27 @@ class DevRuntimeBehaviorTest {
         controller.complete(response);assertTrue(response.getRedirectedUrl().startsWith("https://admission.auth.us-east-2.amazoncognito.com/logout?"));
         assertEquals("no-store",controller.access().getHeaders().getCacheControl());
         assertFalse(controller.access().getBody().contains("<script"));
+    }
+    @Test void accessPageIsSelfContainedAndItsPolicyHashesTheServedStyleBlock() throws Exception {
+        var reply=new DevAccessController(environment(),mock(GatewayController.class)).access();
+        String body=reply.getBody(),policy=reply.getHeaders().getFirst("Content-Security-Policy");
+        // The page keeps its purpose and the admission link, and makes no network request of any kind.
+        assertTrue(body.startsWith("<!doctype html>"));assertTrue(body.contains("<html lang=\"en\">"));assertTrue(body.contains("<meta name=\"viewport\""));
+        assertTrue(body.contains("Authorized testers"));assertTrue(body.contains("href=\"/dev/oauth2/authorization/admission\""));assertTrue(body.contains("Sign in to DEV"));
+        assertTrue(body.contains("aria-describedby=\"signin-hint\""));assertTrue(body.contains("id=\"signin-hint\""));assertTrue(body.contains(" title=\""));
+        assertFalse(body.contains("<script"));assertFalse(body.contains("http://"));assertFalse(body.contains("https://"));
+        assertFalse(body.contains("<link"));assertFalse(body.contains("<img"));assertFalse(body.contains("@import"));assertFalse(body.contains("url("));
+        assertFalse(body.contains(" style=\""));assertEquals(body.indexOf("<style"),body.lastIndexOf("<style"));
+        // The policy stays strict and admits exactly the served inline style block by its own hash.
+        assertTrue(policy.startsWith("default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'sha256-"));assertTrue(policy.endsWith("'"));
+        String css=body.substring(body.indexOf("<style>")+"<style>".length(),body.indexOf("</style>"));
+        String expected=Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(css.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertEquals(DevAccessPage.BASE_POLICY+"; style-src 'sha256-"+expected+"'",policy);
+        assertEquals(1,policy.split("style-src",-1).length-1);
+        // A page without exactly one style block, or a missing resource, fails at startup rather than serving a page the policy would block.
+        assertThrows(IllegalStateException.class,()->DevAccessPage.styleHash("<html><body>no style</body></html>"));
+        assertThrows(IllegalStateException.class,()->DevAccessPage.styleHash("<style>a</style><style>b</style>"));
+        assertThrows(IllegalStateException.class,()->DevAccessPage.load("dev-access-missing.html"));
     }
     MockEnvironment upstreams(){return new MockEnvironment().withProperty("app.oauth.domain-api-upstream","https://domain.lookahead-dev.internal:8443")
         .withProperty("app.gateway.web-upstream","https://web.lookahead-dev.internal:8443");}

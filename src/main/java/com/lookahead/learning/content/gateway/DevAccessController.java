@@ -12,10 +12,10 @@ public final class DevAccessController {
     private final Environment environment;
     private final GatewayController learner;
     public DevAccessController(Environment environment, GatewayController learner) { this.environment = environment; this.learner = learner; }
+    private static final DevAccessPage PAGE = DevAccessPage.load(DevAccessPage.RESOURCE);
     @GetMapping(value="/dev/access", produces="text/html")
     ResponseEntity<String> access() {
-        return ResponseEntity.ok().header("Cache-Control", "no-store").header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
-            .body("<!doctype html><html lang=\"en\"><title>DEV access</title><h1>Look Ahead DEV</h1><p>Authorized testers only.</p><a href=\"/dev/oauth2/authorization/admission\">Sign in to DEV</a></html>");
+        return ResponseEntity.ok().header("Cache-Control", "no-store").header("Content-Security-Policy", PAGE.policy).body(PAGE.html);
     }
     @GetMapping("/dev/csrf") ResponseEntity<Map<String,String>> csrf(CsrfToken token) {
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(Map.of("headerName", token.getHeaderName(), "token", token.getToken()));

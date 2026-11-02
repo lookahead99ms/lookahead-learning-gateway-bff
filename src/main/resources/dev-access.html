@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>Look Ahead DEV · Authorized testers</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f2f7f6;
+  --surface: #fff;
+  --text-strong: #102a33;
+  --text: #28434a;
+  --text-subtle: #536970;
+  --line: #cfdfdc;
+  --accent: #006c73;
+  --on-accent: #fff;
+  --shadow: #173d3910;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101c30;
+    --surface: #192942;
+    --text-strong: #f4eee6;
+    --text: #d5dbe3;
+    --text-subtle: #a9b4c4;
+    --line: #3d4c64;
+    --accent: #ffba87;
+    --on-accent: #101c30;
+    --shadow: #0000004a;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+main {
+  width: 100%;
+  max-width: 440px;
+  padding: 32px 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px var(--shadow);
+}
+h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 20px;
+  color: var(--text-strong);
+  font-size: 1.75rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+p { margin: 0; }
+.lead {
+  color: var(--text-strong);
+  font-size: 1.125rem;
+  font-weight: 500;
+}
+.note {
+  margin-top: 8px;
+  color: var(--text);
+}
+.button {
+  display: block;
+  width: 100%;
+  margin-top: 24px;
+  padding: 12px 20px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+.button:hover { filter: brightness(0.94); }
+.button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.hint {
+  margin-top: 12px;
+  color: var(--text-subtle);
+  font-size: 0.875rem;
+  text-align: center;
+}
+@media (max-width: 420px) {
+  main { padding: 24px 20px; }
+  h1 { font-size: 1.5rem; }
+}
+</style>
+</head>
+<body>
+<main>
+<h1>Look Ahead <span class="tag">DEV</span></h1>
+<p class="lead">A private environment for authorized testers.</p>
+<p class="note">Signing in uses your tester account.</p>
+<a class="button" href="/dev/oauth2/authorization/admission" title="Opens the tester sign-in" aria-describedby="signin-hint">Sign in to DEV</a>
+<p class="hint" id="signin-hint">Opens the tester sign-in. After it, the normal Look Ahead sign-in follows.</p>
+</main>
+</body>
+</html>
