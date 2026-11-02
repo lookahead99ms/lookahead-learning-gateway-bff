@@ -87,15 +87,49 @@ rotation; those remain release evidence requirements.
 These Gateway-owned routes exist only when the DEV admission profile is active; they are not
 part of Local or PROD. Every other route requires an admitted session first.
 
+Since DLV-969 (November 2, 2026) the gate accepts a sign-in to the Look Ahead pool and nothing
+else. The gate page is our own sign-in page: **Continue with Google** (only while
+`app.cognito.google-sign-in` / `LOOKAHEAD_GOOGLE_SIGN_IN` is true) links to
+`/bff/login?provider=google&returnTo=/`, and **Sign in with email and password** links to
+`/bff/login?provider=password&returnTo=/`. When the callback succeeds with a fresh `auth_time` (at
+most 120 s old, at most 30 s ahead) the Gateway records the gate admission for its 8-hour absolute
+window and asks Domain to admit the account. **The gate stays open only if Domain admits it**
+(README decision 2: nothing beyond the landing page without the owner's approval):
+
+- `403 ACCOUNT_ADMISSION_REQUIRED` (a new or still-waiting account) ends the learner sign-in, drops
+  every gate admission on the session, including one left by an earlier sign-in in the same
+  browser, and redirects to `/dev/access?access=pending`.
+- Any other refusal ends the learner sign-in and puts back the gate the browser held before. With an
+  open gate it lands on `/sign-in?error=admission`; without one, on `/dev/access?error=signin`.
+- A failed provider sign-in (`loginFailed`) lands on `/dev/access?error=signin` outside an open
+  gate and on `/sign-in?error=oauth` inside one.
+
+The tester pool, its client registration, its `AdminGetUser` directory check and the 5-minute
+re-check are no longer consulted or present in the code. Without the gate (PROD) a waiting account
+lands on `/?access=pending`.
+
+### Choosing the provider (DLV-969)
+
+`/bff/login` takes an optional `provider`: `google` or `password`; any other value is ignored. It
+travels to `/oauth2/authorization/lookahead?provider=…`, where the authorization request gains:
+
+| Provider | `identity_provider` | `prompt` | Why |
+| --- | --- | --- | --- |
+| none | not sent | `login` | Cognito's managed login page, as before |
+| `password` | `COGNITO` | `login` | Cognito's password form only |
+| `google` (switch on) | `Google` | `select_account` | Cognito goes straight to Google; Google rejects `prompt=login`, and the chooser lets someone switch accounts after signing out |
+
+`google` with the switch off falls back to the first row. `GET /api/v1/auth/options` reports the
+switch as `google`.
+
 | Method | Path | Response |
 | --- | --- | --- |
-| GET | `/dev/access` | `200 text/html` access page linking to `/dev/oauth2/authorization/admission`; `Content-Security-Policy: default-src 'none'` |
-| GET | `/dev/oauth2/authorization/admission` | `302` to the admission pool's managed login with PKCE, `prompt=login`, `max_age=0` |
-| GET | `/dev/login/oauth2/code/admission` | admission callback; enabled tester with fresh `auth_time` → `302 /`; disabled/unknown or stale authentication → `403`; directory unavailable → `503` |
+| GET | `/dev/access` | `200 text/html` access page (our sign-in page) whose buttons link to `/bff/login?provider=google&returnTo=%2F` (switch on) and `/bff/login?provider=password&returnTo=%2F`; `?access=pending` and `?error=…` add one fixed notice, never request text; `Content-Security-Policy: default-src 'none'` plus the hash of its one style block |
+| GET | `/bff/login`, `/oauth2/authorization/lookahead`, `/login/oauth2/code/lookahead` | pass the gate unadmitted so the learner sign-in can run; the callback's success handler grants the gate (`ADMISSION_GRANTED`) or, for a stale `auth_time`, ends the sign-in (`ADMISSION_DENIED`, `302 /dev/access?error=signin` without an earlier open gate) |
 | GET | `/dev/csrf` | `200 {"headerName":"X-CSRF-TOKEN","token":...}` (no admission required) |
-| GET | `/dev/session` | admitted: `200 {"dev":true,"deadline":"" or ISO instant,"warning":bool,"maintenance":bool}`; operations table unavailable: `503 {"code":"DEV_STATUS_UNAVAILABLE"}`; not admitted or expired: `401 {"code":"DEV_ADMISSION_REQUIRED"}`; admission directory unavailable during the freshness recheck: `503 {"code":"DEV_ADMISSION_UNAVAILABLE"}` (October 30, 2026: previously a `302` redirect to `/dev/access`) |
+| GET | `/dev/session` | admitted: `200 {"dev":true,"deadline":"" or ISO instant,"warning":bool,"maintenance":bool}`; operations table unavailable: `503 {"code":"DEV_STATUS_UNAVAILABLE"}`; not admitted or expired: `401 {"code":"DEV_ADMISSION_REQUIRED"}` (October 30, 2026: previously a `302` redirect to `/dev/access`; the `503 DEV_ADMISSION_UNAVAILABLE` answer left with the directory check) |
 | POST | `/dev/leave` | requires `X-CSRF-TOKEN`; `200 {"logoutUrl","learnerSignOutConfirmed","providerRevocationConfirmed":"false"}`; missing token `403` |
-| GET | `/dev/leave/complete` | `302` to the admission pool's managed logout returning to `/dev/access` |
+| GET | `/dev/leave/complete` | `302 /dev/access` (the learner provider is the gate's provider, so there is no second logout) |
 
 Before admission, browser navigation routes answer `302 /dev/access`; `/api/`, `/bff/`, `/content/`,
 `/dev/` and non-GET requests answer `401 {"code":"DEV_ADMISSION_REQUIRED"}` JSON. All responses are

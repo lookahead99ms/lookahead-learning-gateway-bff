@@ -57,6 +57,7 @@ class CloudGatewaySecurityIntegrationTest {
     @Autowired ClientRegistrationRepository registrations;
     @Autowired OAuth2AuthorizedClientRepository clients;
     @Autowired GatewaySecurityHandlers handlers;
+    @Autowired RestClient http;
     MockMvc mvc;
     @BeforeEach void reset(){fixture.server.reset();mvc=MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();SecurityContextHolder.clearContext();}
     MockHttpSession session(boolean restricted)throws Exception {
@@ -139,7 +140,7 @@ class CloudGatewaySecurityIntegrationTest {
     @Test void failedAdmissionKeepsTheDevGateAdmissionSoTheSignInPageExplains()throws Exception {
         // DLV-968 (2026-11-02): in DEV the learner rejection must not drop the gate admission, or the browser lands on /dev/access.
         var session=session(false);var now=java.time.Instant.parse("2026-11-02T08:00:00Z");
-        var admission=new DevAdmission.State("author@lookahead.dev","010b25a0-c0f1-709c-467f-06e036639814",now,now);
+        var admission=new DevAdmission.State("author@lookahead.dev","010b25a0-c0f1-709c-467f-06e036639814",now);
         session.setAttribute(DevAdmission.ATTRIBUTE,admission);
         var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
         var auth=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
@@ -151,6 +152,96 @@ class CloudGatewaySecurityIntegrationTest {
         assertThat(replacement.getAttribute(DevAdmission.ATTRIBUTE)).isEqualTo(admission);
         assertThat(replacement.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
         assertThat(replacement.getMaxInactiveInterval()).isEqualTo(8*3600);fixture.server.verify();
+    }
+    @Test void waitingAccountKeepsTheGateAndLandsOnThePendingNotice()throws Exception {
+        // DLV-969: Domain's 403 ACCOUNT_ADMISSION_REQUIRED ends the learner sign-in, keeps the DEV gate and shows the landing notice.
+        var session=session(false);var now=Instant.parse("2026-11-02T08:00:00Z");
+        var admission=new DevAdmission.State("author@lookahead.dev","010b25a0-c0f1-709c-467f-06e036639814",now);
+        session.setAttribute(DevAdmission.ATTRIBUTE,admission);
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        var auth=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"ACCOUNT_ADMISSION_REQUIRED\",\"message\":\"Sign in again or contact the account administrator.\"}"));
+        handlers.loginSucceeded(request,response,auth);
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/?access=pending");assertThat(session.isInvalid()).isTrue();
+        var replacement=request.getSession(false);
+        assertThat(replacement).isNotNull().isNotSameAs(session);
+        assertThat(replacement.getAttribute(DevAdmission.ATTRIBUTE)).isEqualTo(admission);
+        assertThat(replacement.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
+        assertThat(clients.<OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",auth,request)).isNull();fixture.server.verify();
+        // Any other 403 keeps the sign-in page explanation.
+        fixture.server.reset();
+        var other=session(false);var otherRequest=new MockHttpServletRequest();otherRequest.setSession(other);var otherResponse=new MockHttpServletResponse();
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"RECENT_AUTHENTICATION_REQUIRED\"}"));
+        handlers.loginSucceeded(otherRequest,otherResponse,((org.springframework.security.core.context.SecurityContext)other.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication());
+        assertThat(otherResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in?error=admission");assertThat(other.isInvalid()).isTrue();fixture.server.verify();
+    }
+    org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken oidcSignIn(Instant now,Instant authTime){
+        var claims=new java.util.HashMap<String,Object>(java.util.Map.of("sub","010b25a0-c0f1-709c-467f-06e036639814","cognito:username","author@lookahead.dev"));
+        if(authTime!=null)claims.put("auth_time",authTime);
+        var token=new org.springframework.security.oauth2.core.oidc.OidcIdToken("synthetic-id-token",now.minusSeconds(5),now.plusSeconds(3600),claims);
+        var user=new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_USER")),token);
+        return new org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken(user,user.getAuthorities(),"lookahead");
+    }
+    @Test void devGateOpensBeforeDomainIsAskedAndTheGrantSurvivesTheSignIn()throws Exception {
+        // DLV-969: with the lower-cost-dev gate present a fresh Look Ahead sign-in opens DEV first; Domain then admits the account.
+        var order=new java.util.ArrayList<String>();var now=Instant.now();var auth=oidcSignIn(now,now.minusSeconds(3));
+        var session=new MockHttpSession(context.getServletContext());session.setAttribute("learningReturnTo","/learn");
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        clients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),auth.getName(),
+            new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,"synthetic-access",now,now.plusSeconds(300))),auth,request,response);
+        DevGate real=DevGate.freshSignIn(java.time.Clock.systemUTC());
+        var gated=new GatewaySecurityHandlers(settings,clients,http,java.util.Optional.of((r,u)->{order.add("gate");real.admit(r,u);}));
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit"))
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("Authorization","Bearer synthetic-access"))
+            .andRespond(sent->{order.add("domain");return withSuccess("{\"data\":{\"signInId\":\"s1\"}}",MediaType.APPLICATION_JSON).createResponse(sent);});
+        String before=session.getId();
+        gated.loginSucceeded(request,response,auth);
+        assertThat(order).containsExactly("gate","domain");
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/learn");
+        assertThat(session.isInvalid()).isFalse();assertThat(session.getId()).isNotEqualTo(before);assertThat(session.getMaxInactiveInterval()).isEqualTo(8*3600);
+        assertThat(session.getAttribute(DevAdmission.ATTRIBUTE)).isEqualTo(new DevAdmission.State("author@lookahead.dev","010b25a0-c0f1-709c-467f-06e036639814",((DevAdmission.State)session.getAttribute(DevAdmission.ATTRIBUTE)).admittedAt()));
+        assertThat(clients.<OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",auth,request)).isNotNull();fixture.server.verify();
+        // A stale sign-in never opens the gate; the learner sign-in ends before Domain is asked.
+        fixture.server.reset();
+        var stale=new MockHttpServletRequest();stale.setSession(new MockHttpSession(context.getServletContext()));var staleResponse=new MockHttpServletResponse();
+        new GatewaySecurityHandlers(settings,clients,http,java.util.Optional.of(real)).loginSucceeded(stale,staleResponse,oidcSignIn(now,now.minusSeconds(600)));
+        // DLV-969: no gate was open before, so the person sees the gate page's notice (the Web sign-in page is behind the gate).
+        assertThat(staleResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/dev/access?error=signin");assertThat(stale.getSession(false)).isNull();fixture.server.verify();
+    }
+    /** DLV-969, README decision 2: a waiting account never gets DEV, even where this browser held an open gate before. */
+    @Test void devGateClosesForAWaitingAccount()throws Exception {
+        var now=Instant.now();var auth=oidcSignIn(now,now.minusSeconds(3));
+        var session=new MockHttpSession(context.getServletContext());
+        var earlier=new DevAdmission.State("someone-else","subject-before",now.minusSeconds(60));session.setAttribute(DevAdmission.ATTRIBUTE,earlier);
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        clients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),auth.getName(),
+            new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,"synthetic-access",now,now.plusSeconds(300))),auth,request,response);
+        var gated=new GatewaySecurityHandlers(settings,clients,http,java.util.Optional.of(DevGate.freshSignIn(java.time.Clock.systemUTC())));
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"ACCOUNT_ADMISSION_REQUIRED\"}"));
+        gated.loginSucceeded(request,response,auth);
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/dev/access?access=pending");
+        assertThat(request.getSession(false)).isNull();
+        assertThat(clients.<OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",auth,request)).isNull();fixture.server.verify();
+        // Any other refusal puts back the gate this browser held before, so its owner sees the sign-in page explanation.
+        fixture.server.reset();
+        var held=new MockHttpSession(context.getServletContext());held.setAttribute(DevAdmission.ATTRIBUTE,earlier);
+        var heldRequest=new MockHttpServletRequest();heldRequest.setSession(held);var heldResponse=new MockHttpServletResponse();
+        clients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),auth.getName(),
+            new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,"synthetic-access",now,now.plusSeconds(300))),auth,heldRequest,heldResponse);
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withServerError());
+        gated.loginSucceeded(heldRequest,heldResponse,auth);
+        assertThat(heldResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in?error=admission");
+        assertThat(heldRequest.getSession(false).getAttribute(DevAdmission.ATTRIBUTE)).isEqualTo(earlier);fixture.server.verify();
+        // A failed provider sign-in outside an open gate returns to the gate page; inside one, to the Web sign-in page.
+        var outside=new MockHttpServletRequest();var outsideResponse=new MockHttpServletResponse();
+        gated.loginFailed(outside,outsideResponse,new org.springframework.security.authentication.BadCredentialsException("synthetic"));
+        assertThat(outsideResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/dev/access?error=signin");
+        var inside=new MockHttpServletRequest();inside.getSession().setAttribute(DevAdmission.ATTRIBUTE,earlier);var insideResponse=new MockHttpServletResponse();
+        gated.loginFailed(inside,insideResponse,new org.springframework.security.authentication.BadCredentialsException("synthetic"));
+        assertThat(insideResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in?error=oauth");
     }
     @Test void challengeAdmissionPreservesSafeDestinationAndNeverReturnsSecrets()throws Exception {
         var session=session(false);session.setAttribute("learningReturnTo","/study-plan?view=week");var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();

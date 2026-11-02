@@ -20,10 +20,7 @@ app:
   gateway:
     # DLV-968 S3: the stable Web upstream the DevWebProxy forwards safe GET/HEAD paths to.
     web-upstream: ${LOOKAHEAD_WEB_UPSTREAM}
-  admission:
-    region: ${AWS_REGION}
-    pool-id: ${LOOKAHEAD_ADMISSION_POOL_ID}
-    managed-login: ${LOOKAHEAD_ADMISSION_MANAGED_LOGIN}
-    client-id: ${LOOKAHEAD_ADMISSION_CLIENT_ID}
+  # DLV-969: the DEV gate opens on the Look Ahead pool sign-in; the LOOKAHEAD_ADMISSION_* task variables are no longer read.
   dev-session:
+    region: ${AWS_REGION}
     table: ${LOOKAHEAD_DEV_STATE_TABLE}

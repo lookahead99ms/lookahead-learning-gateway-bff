@@ -36,6 +36,15 @@ class CloudGatewaySessionsTest {
         assertThat(result.status()).isEqualTo(200);server.verify();
         assertThat(CloudGatewaySessions.proof(new MockHttpServletRequest(),false)).isNull();
     }
+    /** DLV-969: the options flag follows the Google switch, so our sign-in page shows the button only once Cognito has Google. */
+    @Test void signInOptionsReportTheGoogleSwitch(){
+        var repo=new org.springframework.security.oauth2.client.web.HttpSessionOAuth2AuthorizedClientRepository();
+        org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager manager=authorization->null;
+        var on=new CloudAccountController(settings(),manager,repo,RestClient.create(),new org.springframework.mock.env.MockEnvironment().withProperty("app.cognito.google-sign-in","true"));
+        var off=new CloudAccountController(settings(),manager,repo,RestClient.create(),new org.springframework.mock.env.MockEnvironment());
+        assertThat(on.options(new MockHttpServletResponse()).data()).isEqualTo(java.util.Map.of("registration",false,"google",true,"oauth",true,"managedLogin",true));
+        assertThat(((java.util.Map<?,?>)off.options(new MockHttpServletResponse()).data()).get("google")).isEqualTo(false);
+    }
     @Test void invalidRefreshGrantExpiresAccountSessionButProviderOutagePreservesIt(){
         for(String code:java.util.List.of("invalid_grant","temporarily_unavailable")){
             var request=new MockHttpServletRequest("GET","/api/v1/account/profile");var session=new MockHttpSession();request.setSession(session);

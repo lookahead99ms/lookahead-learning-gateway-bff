@@ -30,12 +30,13 @@ public class GatewayController {
     public GatewayController(OAuthSettings settings,OAuth2AuthorizedClientManager manager,OAuth2AuthorizedClientRepository clients,RestClient http) {
         this.settings=settings;this.manager=manager;this.clients=clients;this.http=http;
     }
+    /** DLV-969: {@code provider} is google or password when the person chose one on our sign-in page; anything else opens Cognito's page. */
     @GetMapping("/bff/login")
-    public void login(@RequestParam(required=false) String returnTo,HttpServletRequest request,HttpServletResponse response) throws java.io.IOException {
+    public void login(@RequestParam(required=false) String returnTo,@RequestParam(required=false) String provider,HttpServletRequest request,HttpServletResponse response) throws java.io.IOException {
         // A browser may request a fresh OAuth flow, never skip verification and
         // continue into the sign-in reuse path.
         if(settings.cloud()&&"true".equals(request.getParameter("reauthenticate"))) {
-            startOAuth(returnTo,request,response);
+            startOAuth(returnTo,provider,request,response);
             return;
         }
         if(settings.cloud()) {
@@ -48,11 +49,13 @@ public class GatewayController {
                 }
             }
         }
-        startOAuth(returnTo,request,response);
+        startOAuth(returnTo,provider,request,response);
     }
-    private void startOAuth(String returnTo,HttpServletRequest request,HttpServletResponse response) throws java.io.IOException {
+    private void startOAuth(String returnTo,String provider,HttpServletRequest request,HttpServletResponse response) throws java.io.IOException {
         request.getSession().setAttribute("learningReturnTo",GatewayConfiguration.safeReturn(returnTo));
-        response.setHeader("Cache-Control","no-store");response.sendRedirect(settings.frontend()+"/oauth2/authorization/lookahead");
+        // Only the two known names travel on; the resolver re-checks them (and whether Google is switched on).
+        String chosen=SignInProvider.from(provider,true).map(p->"?"+SignInProvider.PARAMETER+"="+p.parameter).orElse("");
+        response.setHeader("Cache-Control","no-store");response.sendRedirect(settings.frontend()+"/oauth2/authorization/lookahead"+chosen);
     }
     @GetMapping("/bff/api/v1/auth/csrf")
     public ApiResponse<CsrfView> csrf(CsrfToken token,HttpServletResponse response) {
@@ -114,8 +117,8 @@ public class GatewayController {
         boolean content=upstreamPath.startsWith("/content/") && request.getMethod().equals("GET");
         boolean account=upstreamPath.equals("/api/v1/auth/me") || upstreamPath.equals("/api/v1/account-catalog")
                 || upstreamPath.equals("/api/v1/support") || upstreamPath.equals("/api/v1/plans") || upstreamPath.startsWith("/api/v1/plans/");
-        boolean staffAccess = ("GET".equals(request.getMethod()) && java.util.Set.of("/api/v1/account/permissions", "/api/v1/admin/access", "/api/v1/admin/access/catalog").contains(upstreamPath)
-                || "POST".equals(request.getMethod()) && java.util.Set.of("/api/v1/admin/access", "/api/v1/admin/access/lookup", "/api/v1/auth/invitations/activate").contains(upstreamPath)) && request.getQueryString()==null;
+        boolean staffAccess = ("GET".equals(request.getMethod()) && java.util.Set.of("/api/v1/account/permissions", "/api/v1/admin/access", "/api/v1/admin/access/catalog", "/api/v1/admin/access/waiting").contains(upstreamPath)
+                || "POST".equals(request.getMethod()) && java.util.Set.of("/api/v1/admin/access", "/api/v1/admin/access/lookup", "/api/v1/admin/access/admit", "/api/v1/auth/invitations/activate").contains(upstreamPath)) && request.getQueryString()==null;
         boolean directory = "GET".equals(request.getMethod()) && "/api/v1/admin/accounts".equals(upstreamPath);
         boolean membership = membershipRoute(request.getMethod(),upstreamPath) && request.getQueryString()==null;
         boolean execution = executionRoute(request.getMethod(), upstreamPath) && request.getQueryString() == null;

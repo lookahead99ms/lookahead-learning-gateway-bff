@@ -460,7 +460,7 @@ written to `aws/ingress/templates/dev/gateway.template.json`) runs the image wit
 `LOOKAHEAD_DOMAIN_UPSTREAM=https://domain-<slot>.lookahead-dev.internal:8443` (both replaced on November 1, 2026
 by the stable upstreams above), the public hostname as
 `LOOKAHEAD_TLS_SERVER_NAME` and `LOOKAHEAD_FRONTEND_ORIGIN=https://<hostname>`, the application pool issuer,
-managed-login origin and scope prefix, the admission pool ID and managed-login origin, the operations table
+managed-login origin and scope prefix, the admission pool ID and managed-login origin (still set, no longer read since DLV-969), the operations table
 name in `LOOKAHEAD_DEV_STATE_TABLE`, `AWS_REGION`, and `JAVA_TOOL_OPTIONS` pointing at
 `/opt/lookahead/dns.security`. ECS injects the eleven credential fields listed above from immutable secret
 versions; `APP_OAUTH_CLIENT_ID` and `LOOKAHEAD_ADMISSION_CLIENT_ID` arrive as injected JSON fields, not
@@ -472,8 +472,9 @@ checks TCP 8443; no HTTP health path is exposed publicly.
 `LowerCostDevRuntimeIntegrationTest` boots the real application with exactly these names and synthetic
 injected certificates and secrets: it proves the `spring.factories` initializer runs, TLS serves the injected
 certificate, readiness answers on the management port, every protected route (including `/actuator/info`,
-`/oauth2/authorization/lookahead` and `/bff/login`) is gated by admission, `/dev/access` and the admission
-OAuth start work against the separate admission client with PKCE, `prompt=login` and `max_age=0`, and a
+`/bff/logout/complete`) is gated by admission, `/dev/access`, `/bff/login` and the learner OAuth start pass
+the gate unadmitted and run against the learner client with PKCE and `prompt=login` (DLV-969: the gate opens
+on a Look Ahead pool sign-in; no separate admission client remains), and a
 missing injected field denies startup with the fixed diagnostic. It makes no AWS call; it is not proof of
 Cognito, DynamoDB, Service discovery, IAM or NLB behavior. `DomainIntegrationBindingsTest` pins the bindings
 Domain's `docs/dev-activation.md` expects: the slot-specific Domain DNS name on application mTLS 8443 only
@@ -481,8 +482,11 @@ Domain's `docs/dev-activation.md` expects: the slot-specific Domain DNS name on 
 connection), the exact application issuer, client ID and the four scopes Domain's token verifier requires,
 and one shared DomainGateway secret binding.
 
-Runtime AWS calls and their IAM needs (task role `lookahead-dev-app-task`): `cognito-idp:AdminGetUser` on
-the admission pool only, and `dynamodb:GetItem` on the operations table limited to partition key `dev`.
+Runtime AWS calls and their IAM needs (task role `lookahead-dev-app-task`): `dynamodb:GetItem` on the
+operations table limited to partition key `dev`. The `cognito-idp:AdminGetUser` call on the tester pool left
+with DLV-969 (November 2, 2026): the DEV gate now opens on the Look Ahead pool sign-in itself, the
+`LOOKAHEAD_ADMISSION_*` task variables stay unread until phase D removes them with the pool, and an account
+Domain has not admitted yet lands on `/?access=pending` with the gate admission kept.
 The Gateway never writes the table and never reads Secrets Manager itself; secret delivery and image pulls
 are execution-role concerns. `/dev/session` reports `deadline`, `warning` and whether an `operation` guard
 is held; it does not invent a lifecycle phase, and an unreachable table answers 503.

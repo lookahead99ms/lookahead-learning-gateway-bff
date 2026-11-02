@@ -89,6 +89,7 @@ class LowerCostDevRuntimeIntegrationTest {
         env.put("LOOKAHEAD_FRONTEND_ORIGIN", "https://dev.example.test");
         env.put("LOOKAHEAD_COGNITO_MANAGED_LOGIN", "https://dev-example.auth.us-east-2.amazoncognito.com");
         env.put("LOOKAHEAD_DEV_STATE_TABLE", "lookahead-dev-operations");
+        // DLV-969: the four LOOKAHEAD_ADMISSION_* values stay in the task definition until phase D; the Gateway no longer reads the pool.
         env.put("LOOKAHEAD_ADMISSION_POOL_ID", "us-east-2_Admission1");
         env.put("LOOKAHEAD_ADMISSION_MANAGED_LOGIN", "https://admission-example.auth.us-east-2.amazoncognito.com");
         env.put("LOOKAHEAD_DOMAIN_UPSTREAM", "https://domain.lookahead-dev.internal:8443");
@@ -152,28 +153,49 @@ class LowerCostDevRuntimeIntegrationTest {
         // Admission gate: browser navigation goes to the access page; APIs, content and release metadata never leak.
         var shell = call("GET", base + "/", Map.of());
         assertEquals(302, shell.status()); assertTrue(shell.location().endsWith("/dev/access"), shell.location());
-        for (String path : List.of("/oauth2/authorization/lookahead", "/actuator/info", "/actuator/health/readiness", "/learn")) {
+        for (String path : List.of("/actuator/info", "/actuator/health/readiness", "/learn")) {
             var reply = call("GET", base + path, Map.of());
             assertEquals(302, reply.status(), path); assertTrue(reply.location().endsWith("/dev/access"), path);
         }
-        for (String path : List.of("/dev/session", "/bff/login", "/bff/api/v1/plans", "/api/v1/auth/me", "/content/lesson.json")) {
+        for (String path : List.of("/dev/session", "/bff/logout/complete", "/bff/api/v1/plans", "/api/v1/auth/me", "/content/lesson.json")) {
             var reply = call("GET", base + path, Map.of());
             assertEquals(401, reply.status(), path); assertTrue(reply.contentType().startsWith("application/json"), path);
             assertTrue(reply.body().contains("DEV_ADMISSION_REQUIRED"), path);
         }
         assertEquals(401, call("POST", base + "/bff/api/v1/plans", Map.of()).status());
 
-        // The access page and admission OAuth start are reachable and bound to the separate admission client.
+        // DLV-969: the access page starts the Look Ahead sign-in; its three routes run unadmitted against the learner client only.
         var access = call("GET", base + "/dev/access", Map.of());
         assertEquals(200, access.status()); assertTrue(access.contentType().startsWith("text/html"));
-        assertTrue(access.body().contains("/dev/oauth2/authorization/admission")); assertTrue(access.policy().contains("default-src 'none'"));
-        var authorize = call("GET", base + "/dev/oauth2/authorization/admission", Map.of());
+        assertTrue(access.body().contains("href=\"/bff/login?provider=password&amp;returnTo=%2F\"")); assertFalse(access.body().contains("/dev/oauth2/"));
+        // Google stays hidden until LOOKAHEAD_GOOGLE_SIGN_IN is set, and asking for it anyway falls back to Cognito's page.
+        assertFalse(access.body().contains("provider=google"));
+        assertTrue(access.policy().contains("default-src 'none'"));
+        var login = call("GET", base + "/bff/login?returnTo=%2F", Map.of());
+        assertEquals(302, login.status()); assertEquals("https://dev.example.test/oauth2/authorization/lookahead", login.location());
+        var authorize = call("GET", base + "/oauth2/authorization/lookahead", Map.of());
         assertEquals(302, authorize.status());
-        assertTrue(authorize.location().startsWith("https://admission-example.auth.us-east-2.amazoncognito.com/oauth2/authorize?"), authorize.location());
-        for (String expected : List.of("client_id=syntheticadmissionclient1", "code_challenge_method=S256", "prompt=login", "max_age=0", "scope=openid",
-                "redirect_uri=https://dev.example.test/dev/login/oauth2/code/admission"))
+        assertTrue(authorize.location().startsWith("https://dev-example.auth.us-east-2.amazoncognito.com/oauth2/authorize?"), authorize.location());
+        for (String expected : List.of("client_id=syntheticlearnerclient1", "code_challenge_method=S256", "prompt=login",
+                "redirect_uri=https://dev.example.test/login/oauth2/code/lookahead"))
             assertTrue(authorize.location().contains(expected), expected);
-        assertFalse(authorize.location().contains("synthetic-admission-client-secret"));
+        assertFalse(authorize.location().contains("synthetic-learner-client-secret")); assertFalse(authorize.location().contains("admission"));
+        assertFalse(authorize.location().contains("identity_provider"));
+        // DLV-969: the password button skips straight to Cognito's own password form.
+        var password = call("GET", base + "/bff/login?provider=password&returnTo=%2F", Map.of());
+        assertEquals(302, password.status()); assertEquals("https://dev.example.test/oauth2/authorization/lookahead?provider=password", password.location());
+        var passwordAuthorize = call("GET", base + "/oauth2/authorization/lookahead?provider=password", Map.of());
+        assertEquals(302, passwordAuthorize.status());
+        assertTrue(passwordAuthorize.location().contains("identity_provider=COGNITO"), passwordAuthorize.location());
+        assertTrue(passwordAuthorize.location().contains("prompt=login"), passwordAuthorize.location());
+        var googleOff = call("GET", base + "/oauth2/authorization/lookahead?provider=google", Map.of());
+        assertEquals(302, googleOff.status()); assertFalse(googleOff.location().contains("identity_provider"), googleOff.location());
+        var unknown = call("GET", base + "/bff/login?provider=facebook&returnTo=%2F", Map.of());
+        assertEquals("https://dev.example.test/oauth2/authorization/lookahead", unknown.location());
+        var removed = call("GET", base + "/dev/oauth2/authorization/admission", Map.of());
+        assertEquals(401, removed.status()); assertTrue(removed.body().contains("DEV_ADMISSION_REQUIRED"));
+        var complete = call("GET", base + "/dev/leave/complete", Map.of());
+        assertEquals(302, complete.status()); assertTrue(complete.location().endsWith("/dev/access"), complete.location());
 
         // Leave DEV needs the admission chain's CSRF token under the header name the Web shell sends.
         var csrf = call("GET", base + "/dev/csrf", Map.of());

@@ -10,8 +10,6 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
-import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
-import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
 import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
 import org.springframework.security.web.SecurityFilterChain;
@@ -51,11 +49,8 @@ public class GatewayConfiguration {
                 org.springframework.security.web.context.SecurityContextHolderFilter.class);
         if (environment.acceptsProfiles(org.springframework.core.env.Profiles.of("lower-cost-dev")))
             http.addFilterBefore(new LearnerIdleFilter(java.time.Clock.systemUTC()), LogicalSignInFilter.class);
-        var resolver=new DefaultOAuth2AuthorizationRequestResolver(clients,"/oauth2/authorization");
-        resolver.setAuthorizationRequestCustomizer(builder->{
-            OAuth2AuthorizationRequestCustomizers.withPkce().accept(builder);
-            if(settings.cloud())builder.additionalParameters(p->p.put("prompt","login"));
-        });
+        // DLV-969: our sign-in page may name the provider (Google or password); Cognito then skips its own page.
+        var resolver=new ProviderAwareResolver(clients,settings.cloud(),SignInProvider.googleEnabled(environment));
         http.headers(headers -> headers.frameOptions(frame -> frame.disable())
                 .addHeaderWriter(new GatewayFrameHeaders()));
         http.csrf(csrf->csrf.csrfTokenRepository(new HttpSessionCsrfTokenRepository()))
