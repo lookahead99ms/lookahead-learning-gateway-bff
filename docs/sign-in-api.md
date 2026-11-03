@@ -155,7 +155,7 @@ Cognito's unauthenticated client operations, so no IAM permission is involved. T
 **Session.** A successful sign-in verifies the ID token (issuer, audience, signature, lifetime, `token_use=id`), rotates
 the session id, saves an `OAuth2AuthenticationToken` with an `OidcUser` and an `OAuth2AuthorizedClient` (access and refresh
 token) exactly as the OAuth callback does, and finishes through `GatewaySecurityHandlers.completeSignIn`: DEV gate
-freshness, Domain admission, waiting accounts (`/dev/access?access=pending` in DEV, `/?access=pending` without the gate)
+freshness, Domain admission, waiting accounts (`/welcome?access=pending` in DEV, `/?access=pending` without the gate)
 and sign-in challenges. The route returns the next path instead of redirecting. Refresh uses the existing token-endpoint
 `refresh_token` grant, which Cognito accepts for refresh tokens from API sign-in.
 
@@ -176,3 +176,9 @@ never logged or echoed.
 hashed bundles (`main|chunk|polyfills|styles|worker-<hash>.js|css`), plus `/api/v1/auth/options`, `/bff/api/v1/auth/csrf` and
 `POST` of the seven routes above. Lesson assets, `/content/**`, every other page and API stay behind the gate. The gate
 card's email button opens `/sign-in?returnTo=%2F`.
+
+**Waiting accounts (DLV-969).** A sign-in that Domain answers with `ACCOUNT_ADMISSION_REQUIRED` lands on the Web page
+`/welcome?access=pending` in DEV: the header, a short waiting notice, the home page's Essence section and the footer. The
+gate lets `/welcome` through before admission; its code ships in the hashed bundles already allowed and it loads no other
+file, so `/content/**` and every other API stay closed. The gate card `/dev/access?access=pending` still renders the same
+notice as a fallback. Without the gate (PROD) a waiting account still lands on `/?access=pending`.

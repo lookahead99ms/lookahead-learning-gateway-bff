@@ -77,7 +77,9 @@ public class GatewaySecurityHandlers {
                     // A waiting account never rides on a gate opened by an earlier sign-in in this browser.
                     Object kept=pending?null:previousGate;
                     DevAdmission.restore(request,kept);
-                    if(pending)return "/dev/access?access=pending";
+                    // DLV-969: a waiting account sees the Look Ahead essence on /welcome while it waits; the gate card
+                    // /dev/access?access=pending still renders the same notice as a fallback.
+                    if(pending)return "/welcome?access=pending";
                     return DevAdmission.open(kept,java.time.Instant.now())?"/sign-in?error=admission":"/dev/access?error=signin";
                 }
                 // No gate (PROD): end the learner sign-in; a waiting account lands on the landing page notice.

@@ -95,7 +95,7 @@ class DevAdmissionTest {
     /** DLV-969: before admission, only our sign-in and sign-up pages, their bundles and the auth routes behind them pass. */
     @Test void ourSignInPagesTheirBundlesAndTheAuthRoutesPassBeforeAdmissionAndNothingElse() throws Exception {
         for (String path : new String[]{"/sign-in", "/sign-up", "/sign-in/forgot", "/sign-in/reset", "/sign-in/new-password", "/sign-in/code",
-                "/sign-up/confirm", "/favicon.svg", "/favicon.ico", "/main-AB12cd_-.js", "/chunk-3NPQ_-3i.js", "/styles-ZX81QW2E.css",
+                "/sign-up/confirm", "/welcome", "/favicon.svg", "/favicon.ico", "/main-AB12cd_-.js", "/chunk-3NPQ_-3i.js", "/styles-ZX81QW2E.css",
                 "/polyfills-ABCDEFGH.js", "/worker-ABCDEFGH.js", "/api/v1/auth/options", "/bff/api/v1/auth/csrf"}) {
             for (String method : new String[]{"GET", "HEAD"}) {
                 var req = request(path, null); req.setMethod(method);
@@ -113,7 +113,7 @@ class DevAdmissionTest {
         // Still closed: other pages, lesson assets and content, other APIs, writes to the pages, source maps and look-alikes.
         for (String[] attempt : new String[][]{{"GET", "/learn"}, {"GET", "/"}, {"GET", "/sign-in/choose"}, {"GET", "/sign-in/../learn"},
                 {"GET", "/assets/scenes/landing/a.svg"}, {"GET", "/assets/visual-code-presentation.js"}, {"GET", "/content/indexes/learn.json"},
-                {"GET", "/bff/api/v1/auth/me"}, {"GET", "/main-ABCDEFGH.js.map"}, {"GET", "/main-ABC.js"}, {"GET", "/evil/main-ABCDEFGH.js"},
+                {"GET", "/bff/api/v1/auth/me"}, {"POST", "/welcome"}, {"GET", "/welcome/extra"}, {"GET", "/main-ABCDEFGH.js.map"}, {"GET", "/main-ABC.js"}, {"GET", "/evil/main-ABCDEFGH.js"},
                 {"POST", "/sign-in"}, {"POST", "/main-ABCDEFGH.js"}, {"GET", "/bff/api/v1/auth/password/sign-in"}, {"POST", "/bff/api/v1/auth/password/other"}}) {
             var req = request(attempt[1], null); req.setMethod(attempt[0]);
             var chain = new MockFilterChain(); filter().doFilter(req, new MockHttpServletResponse(), chain);

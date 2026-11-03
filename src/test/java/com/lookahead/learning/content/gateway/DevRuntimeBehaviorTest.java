@@ -115,6 +115,11 @@ class DevRuntimeBehaviorTest {
         assertThrows(IllegalStateException.class,()->new DevAccessPage("<style>a</style><p>no marks</p>").render(false,DevAccessPage.Notice.NONE));
         assertThrows(IllegalStateException.class,()->new DevAccessPage("<style>a</style><!--notice--><!--/google--><!--google-->").render(true,DevAccessPage.Notice.NONE));
     }
+    /** DLV-969: the gate card's waiting notice still renders as a fallback after waiting accounts moved to /welcome. */
+    @Test void gateCardStillShowsTheWaitingNoticeAsAFallback() {
+        String pending=new DevAccessController(environment(),mock(GatewayController.class)).access("pending",null).getBody();
+        assertTrue(pending.contains("The owner has to approve your access before DEV opens."));
+    }
     MockEnvironment upstreams(){return new MockEnvironment().withProperty("app.oauth.domain-api-upstream","https://domain.lookahead-dev.internal:8443")
         .withProperty("app.gateway.web-upstream","https://web.lookahead-dev.internal:8443");}
     @Test void webProxyForwardsNoBrowserCredentialsOrQueries() {

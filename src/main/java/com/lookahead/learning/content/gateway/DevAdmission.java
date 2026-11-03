@@ -22,7 +22,10 @@ public final class DevAdmission extends OncePerRequestFilter {
         "/bff/api/v1/auth/password/password/forgot", "/bff/api/v1/auth/password/password/reset");
     /** DLV-969: the Web pages of our sign-in and sign-up, readable (GET/HEAD only) before admission. */
     static final Set<String> OPEN_PAGES = Set.of("/sign-in", "/sign-up", "/sign-in/forgot", "/sign-in/reset", "/sign-in/new-password",
-        "/sign-in/code", "/sign-up/confirm", "/favicon.svg", "/favicon.ico");
+        "/sign-in/code", "/sign-up/confirm", "/favicon.svg", "/favicon.ico",
+        // DLV-969: where a waiting account lands (header, waiting notice, the Essence section, footer); its code ships in
+        // the hashed bundles below and it loads no other file.
+        "/welcome");
     /** The Web build's top-level hashed bundles those pages load; lesson assets under /assets and /content stay closed. */
     static final java.util.regex.Pattern OPEN_BUNDLES = java.util.regex.Pattern.compile("/(main|chunk|polyfills|styles|worker)-[A-Za-z0-9_-]{6,16}\\.(js|css)");
     static boolean open(HttpServletRequest request) {

@@ -232,7 +232,8 @@ class CloudGatewaySecurityIntegrationTest {
         fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
             .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"ACCOUNT_ADMISSION_REQUIRED\"}"));
         gated.loginSucceeded(request,response,auth);
-        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/dev/access?access=pending");
+        // DLV-969: the waiting account lands on the Web welcome page (the Look Ahead essence), not the gate card.
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/welcome?access=pending");
         assertThat(request.getSession(false)).isNull();
         assertThat(clients.<OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",auth,request)).isNull();fixture.server.verify();
         // Any other refusal puts back the gate this browser held before, so its owner sees the sign-in page explanation.

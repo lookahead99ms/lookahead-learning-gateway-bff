@@ -271,7 +271,7 @@ class DomainContractTest {
         assertThat(new TreeSet<>(webPaths)).isEqualTo(expected);
         for (String path : webPaths) {
             assertThat(DevWebProxy.safePath(path)).as(path + " is forwarded to Web").isTrue();
-            assertThat(path.startsWith("/sign-in") || path.equals("/index.html") || GatewayConfiguration.safeReturn(path).equals(path)).as(path).isTrue();
+            assertThat(path.startsWith("/sign-in") || path.equals("/index.html") || path.equals("/welcome") || GatewayConfiguration.safeReturn(path).equals(path)).as(path).isTrue();
         }
     }
 }
