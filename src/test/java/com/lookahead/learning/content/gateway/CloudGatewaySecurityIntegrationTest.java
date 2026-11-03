@@ -44,7 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class CloudGatewaySecurityIntegrationTest {
     @Configuration @EnableAutoConfiguration
     @Import({GatewayConfiguration.class,GatewayClientConfiguration.class,OAuthPropertiesConfiguration.class,
-        GatewayController.class,CloudAccountController.class,IdentityProxyController.class,
+        GatewayController.class,CloudAccountController.class,PasswordSignInController.class,IdentityProxyController.class,
         AccountProxyController.class,GatewayErrorHandler.class,ControlledHttp.class})
     static class Application {}
     @Configuration static class ControlledHttp {
@@ -85,7 +85,7 @@ class CloudGatewaySecurityIntegrationTest {
         assertThat(settings.identityUpstream()).isNull();
         mvc.perform(get("/api/v1/auth/options")).andExpect(status().isOk())
             .andExpect(jsonPath("$.data.managedLogin").value(true))
-            .andExpect(jsonPath("$.data.registration").value(false));
+            .andExpect(jsonPath("$.data.registration").value(true)).andExpect(jsonPath("$.data.password").value(true));
         mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_FORM_URLENCODED)
             .content("username=synthetic&password=never-used")).andExpect(status().isForbidden());
     }
@@ -211,6 +211,16 @@ class CloudGatewaySecurityIntegrationTest {
         assertThat(staleResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/dev/access?error=signin");assertThat(stale.getSession(false)).isNull();fixture.server.verify();
     }
     /** DLV-969, README decision 2: a waiting account never gets DEV, even where this browser held an open gate before. */
+    /** DLV-969: the password routes need no sign-in but always need the session CSRF token; bad input never reaches Cognito. */
+    @Test void passwordRoutesAreAnonymousButCsrfProtected() throws Exception {
+        mvc.perform(post("/bff/api/v1/auth/password/sign-in").contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+        var session=new org.springframework.mock.web.MockHttpSession(context.getServletContext());
+        String token=csrf(session);
+        mvc.perform(post("/bff/api/v1/auth/password/sign-in").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        mvc.perform(post("/bff/api/v1/auth/password/challenge").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("STEP_EXPIRED"));
+    }
     @Test void devGateClosesForAWaitingAccount()throws Exception {
         var now=Instant.now();var auth=oidcSignIn(now,now.minusSeconds(3));
         var session=new MockHttpSession(context.getServletContext());

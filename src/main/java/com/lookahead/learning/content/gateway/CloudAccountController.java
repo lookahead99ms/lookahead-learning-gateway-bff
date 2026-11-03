@@ -31,9 +31,12 @@ public class CloudAccountController {
     @org.springframework.beans.factory.annotation.Autowired
     public CloudAccountController(OAuthSettings settings,OAuth2AuthorizedClientManager manager,OAuth2AuthorizedClientRepository clients,RestClient http,org.springframework.core.env.Environment environment){this(settings,manager,clients,http,SignInProvider.googleEnabled(environment));}
     CloudAccountController(OAuthSettings settings,OAuth2AuthorizedClientManager manager,OAuth2AuthorizedClientRepository clients,RestClient http,boolean google){this.settings=settings;this.manager=manager;this.clients=clients;this.sessions=new CloudGatewaySessions(settings,http);this.google=google;}
-    /** DLV-969: {@code google} is true once the pool has the Google provider; our sign-in page then shows the Google button. */
+    /**
+     * DLV-969: {@code google} is true once the pool has the Google provider; {@code password} and {@code registration}
+     * tell our sign-in page to show its own email-and-password and sign-up forms (Cognito works behind them).
+     */
     @GetMapping("/api/v1/auth/options")
-    public ApiResponse<?> options(HttpServletResponse response){response.setHeader("Cache-Control","no-store");return ApiResponse.success(Map.of("registration",false,"google",google,"oauth",true,"managedLogin",true));}
+    public ApiResponse<?> options(HttpServletResponse response){response.setHeader("Cache-Control","no-store");return ApiResponse.success(Map.of("registration",true,"password",true,"google",google,"oauth",true,"managedLogin",true));}
     @GetMapping("/api/v1/auth/csrf")
     public ApiResponse<CsrfView> csrf(CsrfToken token,HttpServletResponse response){response.setHeader("Cache-Control","no-store");return ApiResponse.success(new CsrfView(token.getToken(),token.getHeaderName(),token.getParameterName()));}
     @GetMapping({"/api/v1/account/sign-ins","/api/v1/auth/sign-in-challenge","/api/v1/account/profile"})

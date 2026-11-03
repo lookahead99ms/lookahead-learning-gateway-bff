@@ -134,3 +134,45 @@ switch as `google`.
 Before admission, browser navigation routes answer `302 /dev/access`; `/api/`, `/bff/`, `/content/`,
 `/dev/` and non-GET requests answer `401 {"code":"DEV_ADMISSION_REQUIRED"}` JSON. All responses are
 `Cache-Control: no-store`. `/dev/session` polling does not extend learner idle expiry.
+
+## Our own sign-in and sign-up (DLV-969, cloud mode)
+
+Since 2026-11-02 the platform's sign-in and sign-up pages are our own; Cognito works behind them. Each route below is a
+CSRF-protected `POST` under `/bff/api/v1/auth/password`, reachable without a sign-in (it creates one), with a body of at
+most 8 KiB. Each calls exactly one Cognito user-pool operation as our confidential client (`SECRET_HASH`); these are
+Cognito's unauthenticated client operations, so no IAM permission is involved. Tokens never leave the Gateway.
+
+| Route | Body | Cognito | Answer (`data.step`) |
+| --- | --- | --- | --- |
+| `/sign-in` | `email`, `password`, `returnTo` | `InitiateAuth` `USER_PASSWORD_AUTH` | `SIGNED_IN` with `next`, or `NEW_PASSWORD`, `APP_CODE`, `EMAIL_CODE` |
+| `/challenge` | `newPassword` or `code` | `RespondToAuthChallenge` (session kept server-side for 3 minutes) | as `/sign-in`; `STEP_EXPIRED` after 3 minutes or on replay |
+| `/sign-up` | `firstName`, `lastName`, `email`, `password`, `returnTo` | `SignUp` (`email`, `given_name`, `family_name`, `name`) | `CODE_SENT` with the masked `destination` |
+| `/sign-up/confirm` | `email`, `code`, `returnTo` | `ConfirmSignUp` | `SIGN_IN` (the password is never kept, so the person signs in once more) |
+| `/sign-up/resend` | `email` | `ResendConfirmationCode` | `CODE_SENT` |
+| `/password/forgot` | `email` | `ForgotPassword` | `CODE_SENT`, the same answer whether or not the account exists |
+| `/password/reset` | `email`, `code`, `newPassword`, `returnTo` | `ConfirmForgotPassword`, then `InitiateAuth` with the new password | as `/sign-in` |
+
+**Session.** A successful sign-in verifies the ID token (issuer, audience, signature, lifetime, `token_use=id`), rotates
+the session id, saves an `OAuth2AuthenticationToken` with an `OidcUser` and an `OAuth2AuthorizedClient` (access and refresh
+token) exactly as the OAuth callback does, and finishes through `GatewaySecurityHandlers.completeSignIn`: DEV gate
+freshness, Domain admission, waiting accounts (`/dev/access?access=pending` in DEV, `/?access=pending` without the gate)
+and sign-in challenges. The route returns the next path instead of redirecting. Refresh uses the existing token-endpoint
+`refresh_token` grant, which Cognito accepts for refresh tokens from API sign-in.
+
+**Domain.** Tokens from API sign-in carry only `aws.cognito.signin.user.admin`. Domain accepts exactly that scope only from
+our client and only with the Gateway's proof (service secret on the internal sign-in routes, per-sign-in proof on API calls);
+see Domain `CognitoTokenVerifier`.
+
+**Errors** (`code`): `INVALID_CREDENTIALS` 401, `USER_NOT_CONFIRMED` 409, `CODE_MISMATCH` 400, `CODE_EXPIRED` 400,
+`INVALID_PASSWORD` 400, `USERNAME_EXISTS` 409, `TOO_MANY_REQUESTS` 429, `STEP_EXPIRED` 400, `INVALID_REQUEST` 400,
+`REQUEST_TOO_LARGE` 413, `SERVICE_UNAVAILABLE` 503. Cognito's own messages are never returned.
+
+**Abuse controls.** Per Gateway task, in memory: 30 attempts per client address and 10 per account in 10 minutes (the
+address is the last `X-Forwarded-For` hop when present). Cognito's own lockout stays behind it. Passwords and codes are
+never logged or echoed.
+
+**DEV gate.** Before admission the gate lets through only `GET`/`HEAD` of `/sign-in`, `/sign-up`, `/sign-in/forgot`,
+`/sign-in/reset`, `/sign-in/new-password`, `/sign-in/code`, `/sign-up/confirm`, the favicon and the Web build's top-level
+hashed bundles (`main|chunk|polyfills|styles|worker-<hash>.js|css`), plus `/api/v1/auth/options`, `/bff/api/v1/auth/csrf` and
+`POST` of the seven routes above. Lesson assets, `/content/**`, every other page and API stay behind the gate. The gate
+card's email button opens `/sign-in?returnTo=%2F`.
