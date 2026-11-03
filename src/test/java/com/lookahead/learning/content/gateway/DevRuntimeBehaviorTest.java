@@ -174,7 +174,8 @@ class DevRuntimeBehaviorTest {
         var config=new DevAdmissionConfiguration();
         assertThrows(IllegalStateException.class,()->config.devGate(new MockEnvironment().withProperty("app.deployment-environment","prod")));
         assertNotNull(config.devGate(new MockEnvironment().withProperty("app.deployment-environment","dev")));
-        var registration=config.admissionFilter();assertEquals(-110,registration.getOrder());assertInstanceOf(DevAdmission.class,registration.getFilter());
+        var settings=new com.lookahead.learning.content.oauth.OAuthSettings("https://cognito-idp.us-east-2.amazonaws.com/us-east-2_Example","client","synthetic-secret","http://identity","http://domain","https://dev.example");
+        var registration=config.admissionFilter(settings);assertEquals(-110,registration.getOrder());assertInstanceOf(DevAdmission.class,registration.getFilter());
     }
     @Test void statusShowsWarningAndMaintenanceWithoutPrivateOperationId() {
         var client=mock(software.amazon.awssdk.services.dynamodb.DynamoDbClient.class);

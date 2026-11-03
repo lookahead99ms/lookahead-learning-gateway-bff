@@ -57,10 +57,40 @@ class DevAdmissionTest {
         filter().doFilter(admitted, new MockHttpServletResponse(), chain); assertNotNull(chain.getRequest());
     }
     @Test void admissionNeedsNoDirectoryAndHoldsForTheWholeWindow() throws Exception {
-        // The 5-minute directory re-check is gone: an admission granted hours ago still passes until the window ends.
+        // No directory: while the pool still knows the user, an admission granted hours ago passes until the window ends.
         var req = request("/", now.minusSeconds(8*3600-1)); var chain = new MockFilterChain();
         filter().doFilter(req, new MockHttpServletResponse(), chain); assertNotNull(chain.getRequest());
         assertEquals(new DevAdmission.State("tester", "subject", now.minusSeconds(8*3600-1)), req.getSession().getAttribute(DevAdmission.ATTRIBUTE));
+    }
+    /** DLV-969: every five minutes an open session asks the pool; a disabled or deleted user loses the gate. */
+    @Test void aUserTheOwnerDisabledOrDeletedLosesTheGateWithinFiveMinutes() throws Exception {
+        var asked = new java.util.ArrayList<String>();
+        var allowed = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var filter = new DevAdmission(Clock.fixed(now, ZoneOffset.UTC), username -> { asked.add(username); return allowed.get(); });
+        // Admitted four minutes ago: not asked yet.
+        var fresh = request("/", now.minusSeconds(240)); var chain = new MockFilterChain();
+        filter.doFilter(fresh, new MockHttpServletResponse(), chain); assertNotNull(chain.getRequest()); assertTrue(asked.isEmpty());
+        // Admitted six minutes ago: asked once, then not again for five minutes.
+        var due = request("/", now.minusSeconds(360)); var session = (MockHttpSession) due.getSession();
+        filter.doFilter(due, new MockHttpServletResponse(), new MockFilterChain());
+        assertEquals(java.util.List.of("tester"), asked); assertEquals(now, session.getAttribute(DevAdmission.CHECKED));
+        var again = new MockHttpServletRequest("GET", "/learn"); again.setSession(session); chain = new MockFilterChain();
+        filter.doFilter(again, new MockHttpServletResponse(), chain); assertNotNull(chain.getRequest()); assertEquals(1, asked.size());
+        // Checked six minutes ago and now disabled or deleted: the session ends and the browser goes back to the gate.
+        session.setAttribute(DevAdmission.CHECKED, now.minusSeconds(360)); allowed.set(false);
+        var page = new MockHttpServletRequest("GET", "/learn"); page.setSession(session); var response = new MockHttpServletResponse();
+        filter.doFilter(page, response, new MockFilterChain());
+        assertTrue(session.isInvalid()); assertEquals("/dev/access", response.getRedirectedUrl());
+        var api = request("/bff/api/v1/plans", now.minusSeconds(600)); var apiResponse = new MockHttpServletResponse();
+        filter.doFilter(api, apiResponse, new MockFilterChain()); assertEquals(401, apiResponse.getStatus());
+    }
+    @Test void whenThePoolDoesNotAnswerTheSessionContinuesAndTheNextRequestAsksAgain() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var filter = new DevAdmission(Clock.fixed(now, ZoneOffset.UTC), username -> { calls.incrementAndGet(); throw new IllegalStateException("pool down"); });
+        var req = request("/", now.minusSeconds(600)); var session = (MockHttpSession) req.getSession(); var chain = new MockFilterChain();
+        filter.doFilter(req, new MockHttpServletResponse(), chain); assertNotNull(chain.getRequest()); assertNull(session.getAttribute(DevAdmission.CHECKED));
+        var next = new MockHttpServletRequest("GET", "/learn"); next.setSession(session);
+        filter.doFilter(next, new MockHttpServletResponse(), new MockFilterChain()); assertEquals(2, calls.get()); assertFalse(session.isInvalid());
     }
     @Test void absoluteExpiryCannotSlide() throws Exception {
         var req=request("/",now.minusSeconds(8*3600)); var old=(MockHttpSession)req.getSession(); old.setAttribute("SPRING_SECURITY_CONTEXT", "learner");
