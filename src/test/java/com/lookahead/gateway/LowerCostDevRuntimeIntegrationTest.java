@@ -167,7 +167,7 @@ class LowerCostDevRuntimeIntegrationTest {
         // DLV-969: the access page starts the Look Ahead sign-in; its three routes run unadmitted against the learner client only.
         var access = call("GET", base + "/dev/access", Map.of());
         assertEquals(200, access.status()); assertTrue(access.contentType().startsWith("text/html"));
-        assertTrue(access.body().contains("href=\"/bff/login?provider=password&amp;returnTo=%2F\"")); assertFalse(access.body().contains("/dev/oauth2/"));
+        assertTrue(access.body().contains("href=\"/sign-in?returnTo=%2F\"")); assertFalse(access.body().contains("/dev/oauth2/"));
         // Google stays hidden until LOOKAHEAD_GOOGLE_SIGN_IN is set, and asking for it anyway falls back to Cognito's page.
         assertFalse(access.body().contains("provider=google"));
         assertTrue(access.policy().contains("default-src 'none'"));

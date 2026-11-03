@@ -13,7 +13,25 @@ public final class DevAdmission extends OncePerRequestFilter {
     static final Duration WINDOW = Duration.ofHours(8);
     /** The gate page and its helpers, plus the learner sign-in that now opens the gate (DLV-969). */
     static final Set<String> OPEN = Set.of("/dev/access", "/dev/csrf", "/dev/leave", "/dev/leave/complete",
-        "/bff/login", "/oauth2/authorization/lookahead", "/login/oauth2/code/lookahead");
+        "/bff/login", "/oauth2/authorization/lookahead", "/login/oauth2/code/lookahead",
+        // DLV-969: our own sign-in and sign-up, before anyone is admitted: the options and CSRF reads and the password routes.
+        "/api/v1/auth/options", "/bff/api/v1/auth/csrf");
+    /** DLV-969: the password routes behind those pages (POST only). */
+    static final Set<String> OPEN_POSTS = Set.of("/bff/api/v1/auth/password/sign-in", "/bff/api/v1/auth/password/challenge",
+        "/bff/api/v1/auth/password/sign-up", "/bff/api/v1/auth/password/sign-up/confirm", "/bff/api/v1/auth/password/sign-up/resend",
+        "/bff/api/v1/auth/password/password/forgot", "/bff/api/v1/auth/password/password/reset");
+    /** DLV-969: the Web pages of our sign-in and sign-up, readable (GET/HEAD only) before admission. */
+    static final Set<String> OPEN_PAGES = Set.of("/sign-in", "/sign-up", "/sign-in/forgot", "/sign-in/reset", "/sign-in/new-password",
+        "/sign-in/code", "/sign-up/confirm", "/favicon.svg", "/favicon.ico");
+    /** The Web build's top-level hashed bundles those pages load; lesson assets under /assets and /content stay closed. */
+    static final java.util.regex.Pattern OPEN_BUNDLES = java.util.regex.Pattern.compile("/(main|chunk|polyfills|styles|worker)-[A-Za-z0-9_-]{6,16}\\.(js|css)");
+    static boolean open(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (OPEN.contains(path)) return true;
+        if ("POST".equals(request.getMethod()) && OPEN_POSTS.contains(path)) return true;
+        boolean read = "GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod());
+        return read && (OPEN_PAGES.contains(path) || OPEN_BUNDLES.matcher(path).matches());
+    }
     record State(String username, String subject, Instant admittedAt) {}
     private final Clock clock;
     DevAdmission(Clock clock) { this.clock = clock; }
@@ -50,7 +68,7 @@ public final class DevAdmission extends OncePerRequestFilter {
         String path = request.getRequestURI();
         if (request.getLocalPort() == 8081 && Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(request.getRemoteAddr())
                 && (path.startsWith("/actuator/health") || path.equals("/actuator/info"))) { chain.doFilter(request, response); return; }
-        if (OPEN.contains(path)) { chain.doFilter(request, response); return; }
+        if (open(request)) { chain.doFilter(request, response); return; }
         var session = request.getSession(false);
         if (session != null && session.getAttribute(ATTRIBUTE) instanceof State state && clock.instant().isBefore(state.admittedAt().plus(WINDOW))) {
             chain.doFilter(request, response); return;
