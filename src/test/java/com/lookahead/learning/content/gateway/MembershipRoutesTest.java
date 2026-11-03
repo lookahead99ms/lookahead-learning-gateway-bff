@@ -23,7 +23,8 @@ class MembershipRoutesTest {
  }
  @Test void realAccountMaintenanceRoutesAreExactAndWriteOnly() {
   String id="12345678-1234-1234-1234-123456789abc";
-  for(String action:java.util.List.of("downgrade","delete")) {
+  // DLV-969: the owner's Disable, Enable and Delete of DEV sign-in accounts.
+  for(String action:java.util.List.of("downgrade","delete","disable","enable","remove")) {
    assertThat(GatewayController.membershipRoute("POST","/api/v1/admin/accounts/"+id+"/"+action)).isTrue();
    assertThat(GatewayController.membershipRoute("GET","/api/v1/admin/accounts/"+id+"/"+action)).isFalse();
    assertThat(GatewayController.membershipRoute("POST","/api/v1/admin/accounts/not-an-id/"+action)).isFalse();

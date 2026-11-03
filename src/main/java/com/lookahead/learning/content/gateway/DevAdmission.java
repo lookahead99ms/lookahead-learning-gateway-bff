@@ -36,8 +36,18 @@ public final class DevAdmission extends OncePerRequestFilter {
         return read && (OPEN_PAGES.contains(path) || OPEN_BUNDLES.matcher(path).matches());
     }
     record State(String username, String subject, Instant admittedAt) {}
+    /** DLV-969: how often an open gate session asks the sign-in pool whether its user may still be here. */
+    static final Duration RECHECK = Duration.ofMinutes(5);
+    static final String CHECKED = "lookaheadDevAdmissionChecked";
+    /**
+     * True while the user still exists and is enabled in the sign-in pool; false once the owner disabled or deleted
+     * them. Throws when the pool cannot answer, and the session then continues until the next request asks again.
+     */
+    @FunctionalInterface interface Account { boolean allowed(String username); }
     private final Clock clock;
-    DevAdmission(Clock clock) { this.clock = clock; }
+    private final Account account;
+    DevAdmission(Clock clock) { this(clock, username -> true); }
+    DevAdmission(Clock clock, Account account) { this.clock = clock; this.account = account; }
     /** Records the gate admission on the signed-in session: the id rotates, the learner state stays, the window is absolute. */
     static void grant(HttpServletRequest request, String username, String subject, Instant now) {
         if (request.getSession(false) != null) request.changeSessionId();
@@ -66,6 +76,18 @@ public final class DevAdmission extends OncePerRequestFilter {
     static boolean open(Object admission, Instant now) {
         return admission instanceof State state && now.isBefore(state.admittedAt().plus(WINDOW));
     }
+    /** At most every {@link #RECHECK}: a disabled or deleted user loses the gate within five minutes, not eight hours. */
+    private boolean stillAllowed(HttpSession session, State state) {
+        Instant now = clock.instant(), checked = session.getAttribute(CHECKED) instanceof Instant at ? at : state.admittedAt();
+        if (now.isBefore(checked.plus(RECHECK))) return true;
+        try {
+            if (!account.allowed(state.username())) return false;
+            session.setAttribute(CHECKED, now);
+        } catch (RuntimeException unavailable) {
+            // The pool did not answer: keep the session; the next request asks again.
+        }
+        return true;
+    }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws IOException, ServletException {
         String path = request.getRequestURI();
@@ -73,7 +95,8 @@ public final class DevAdmission extends OncePerRequestFilter {
                 && (path.startsWith("/actuator/health") || path.equals("/actuator/info"))) { chain.doFilter(request, response); return; }
         if (open(request)) { chain.doFilter(request, response); return; }
         var session = request.getSession(false);
-        if (session != null && session.getAttribute(ATTRIBUTE) instanceof State state && clock.instant().isBefore(state.admittedAt().plus(WINDOW))) {
+        if (session != null && session.getAttribute(ATTRIBUTE) instanceof State state && clock.instant().isBefore(state.admittedAt().plus(WINDOW))
+                && stillAllowed(session, state)) {
             chain.doFilter(request, response); return;
         }
         if (session != null) { SecurityAuditFilter.record(SecurityAuditFilter.Event.SESSION_ENDED); session.invalidate(); org.springframework.security.core.context.SecurityContextHolder.clearContext(); }

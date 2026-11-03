@@ -23,8 +23,9 @@ public class DevAdmissionConfiguration {
         if (!"dev".equals(env.getRequiredProperty("app.deployment-environment"))) throw new IllegalStateException("DEV profile only");
         return DevGate.freshSignIn(Clock.systemUTC());
     }
-    @Bean FilterRegistrationBean<DevAdmission> admissionFilter() {
-        var bean = new FilterRegistrationBean<>(new DevAdmission(Clock.systemUTC()));
+    /** DLV-969: every five minutes an open gate session asks the pool whether its user was disabled or deleted. */
+    @Bean FilterRegistrationBean<DevAdmission> admissionFilter(com.lookahead.learning.content.oauth.OAuthSettings settings) {
+        var bean = new FilterRegistrationBean<>(new DevAdmission(Clock.systemUTC(), CognitoAdmissionCheck.forIssuer(settings.issuer())));
         bean.setOrder(-110); return bean;
     }
     @Bean @Order(0) SecurityFilterChain admissionSecurity(HttpSecurity http) throws Exception {
