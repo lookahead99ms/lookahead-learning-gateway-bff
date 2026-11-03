@@ -62,6 +62,9 @@ public class GatewayConfiguration {
                         // DLV-914: /actuator/info reports build.version, releaseTag and sourceRevision; GET only, nothing else exposed.
                         .requestMatchers(org.springframework.http.HttpMethod.GET,"/actuator/info").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.POST,"/bff/api/v1/auth/password/**").permitAll()
+                        // DLV-969 S35 (DEV only): signed out inside the open gate; the controller requires the gate admission.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,"/bff/api/v1/auth/test-accounts").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST,"/bff/api/v1/auth/test-session").permitAll()
                         .requestMatchers("/bff/login","/bff/logout/complete","/bff/api/v1/auth/csrf","/oauth2/authorization/**","/login/oauth2/code/**","/content/**","/actuator/health","/actuator/health/**","/api/v1/auth/options","/api/v1/auth/csrf").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/bff/author/previews/**").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.HEAD, "/bff/author/previews/**").authenticated()

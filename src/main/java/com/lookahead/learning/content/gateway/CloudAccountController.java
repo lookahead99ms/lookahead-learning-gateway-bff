@@ -47,6 +47,8 @@ public class CloudAccountController {
         String path=request.getRequestURI();String action=path.substring(path.lastIndexOf('/')+1);
         if(action.equals("sign-ins"))action="inventory";if(action.equals("sign-in-challenge"))action="challenge";
         if(CloudGatewaySessions.restricted(request)&&!java.util.Set.of("challenge","replace","cancel").contains(action))return failure(401,"SIGN_IN_CHALLENGE_REQUIRED");
+        // DLV-969 S35: a test account has no sign-in, profile or password of its own to show or change.
+        if(TestSessionController.active(authentication))return failure(409,"TEST_SESSION");
         try {
             var client=manager.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead").principal(authentication).attributes(a->{a.put(HttpServletRequest.class.getName(),request);a.put(HttpServletResponse.class.getName(),response);}).build());
             if(client==null)return failure(401,"AUTHENTICATION_REQUIRED");
@@ -72,7 +74,7 @@ public class CloudAccountController {
         } catch(RuntimeException error){return failure(503,"SERVICE_UNAVAILABLE");}
     }
     private static ResponseEntity<?> failure(int status,String code){
-        String message=code.equals("SIGN_IN_CHALLENGE_REQUIRED")?"Choose an active sign-in to continue.":status==401?"Sign in again to continue.":"Sign-in service is unavailable. Retry shortly.";
+        String message=code.equals("SIGN_IN_CHALLENGE_REQUIRED")?"Choose an active sign-in to continue.":code.equals("TEST_SESSION")?"Test accounts have no sign-in, profile or password of their own.":status==401?"Sign in again to continue.":"Sign-in service is unavailable. Retry shortly.";
         return ResponseEntity.status(status).header("Cache-Control","no-store").body(Map.of("code",code,"message",message));
     }
 }
