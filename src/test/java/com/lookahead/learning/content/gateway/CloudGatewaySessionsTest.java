@@ -42,7 +42,7 @@ class CloudGatewaySessionsTest {
         org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager manager=authorization->null;
         var on=new CloudAccountController(settings(),manager,repo,RestClient.create(),new org.springframework.mock.env.MockEnvironment().withProperty("app.cognito.google-sign-in","true"));
         var off=new CloudAccountController(settings(),manager,repo,RestClient.create(),new org.springframework.mock.env.MockEnvironment());
-        assertThat(on.options(new MockHttpServletResponse()).data()).isEqualTo(java.util.Map.of("registration",false,"google",true,"oauth",true,"managedLogin",true));
+        assertThat(on.options(new MockHttpServletResponse()).data()).isEqualTo(java.util.Map.of("registration",true,"password",true,"google",true,"oauth",true,"managedLogin",true));
         assertThat(((java.util.Map<?,?>)off.options(new MockHttpServletResponse()).data()).get("google")).isEqualTo(false);
     }
     @Test void invalidRefreshGrantExpiresAccountSessionButProviderOutagePreservesIt(){

@@ -56,6 +56,7 @@ class DomainContractTest {
             "synthetic-client-secret-for-domain-contract", "http://identity:8080", UPSTREAM, "http://127.0.0.1:4331");
     static final Pattern DOMAIN_LITERAL = Pattern.compile("\"(/(?:api/v1|content|internal/v1)/[^\"]*)\"");
     static final Pattern FRONTEND_LITERAL = Pattern.compile("frontend\\(\\)\\s*\\+\\s*\"(/[^\"?&]*)");
+    static final Pattern RETURNED_PATH = Pattern.compile("return\\s+\"(/[^\"?&]*)");
     static final Set<String> METHODS = Set.of("GET", "POST", "PUT", "DELETE");
 
     static JsonNode contract() throws IOException {
@@ -255,6 +256,9 @@ class DomainContractTest {
         for (Path file : mainSources()) {
             Matcher redirect = FRONTEND_LITERAL.matcher(source(file));
             while (redirect.find()) if (DevWebProxy.safePath(redirect.group(1))) expected.add(redirect.group(1));
+            // DLV-969: the shared sign-in completion returns the next path (redirected by the OAuth callback, sent as JSON by the password route).
+            Matcher returned = RETURNED_PATH.matcher(source(file));
+            while (returned.find()) if (DevWebProxy.safePath(returned.group(1))) expected.add(returned.group(1));
         }
         String configuration = source(MAIN.resolve("com/lookahead/learning/content/gateway/GatewayConfiguration.java"));
         int start = configuration.indexOf("public static String safeReturn(");
@@ -267,7 +271,7 @@ class DomainContractTest {
         assertThat(new TreeSet<>(webPaths)).isEqualTo(expected);
         for (String path : webPaths) {
             assertThat(DevWebProxy.safePath(path)).as(path + " is forwarded to Web").isTrue();
-            assertThat(path.startsWith("/sign-in") || path.equals("/index.html") || GatewayConfiguration.safeReturn(path).equals(path)).as(path).isTrue();
+            assertThat(path.startsWith("/sign-in") || path.equals("/index.html") || path.equals("/welcome") || GatewayConfiguration.safeReturn(path).equals(path)).as(path).isTrue();
         }
     }
 }

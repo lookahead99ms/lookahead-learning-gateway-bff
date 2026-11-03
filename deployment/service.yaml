@@ -30,6 +30,8 @@ shared:
     LOOKAHEAD_COGNITO_ISSUER: '@application.cognitoIssuer'
     LOOKAHEAD_COGNITO_SCOPE_PREFIX: '@application.cognitoScopePrefix'
     LOOKAHEAD_COGNITO_MANAGED_LOGIN: '@application.cognitoManagedLogin'
+    # DLV-969: Continue with Google; true only once the Look Ahead pool has the Google provider.
+    LOOKAHEAD_GOOGLE_SIGN_IN: 'true'
     LOOKAHEAD_DOMAIN_TRANSPORT: service-connect-tls
   resourceRefs:
   - domainEndpoint

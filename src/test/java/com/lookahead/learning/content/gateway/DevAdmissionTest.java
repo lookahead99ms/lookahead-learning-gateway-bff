@@ -91,4 +91,33 @@ class DevAdmissionTest {
             assertFalse(DevWebProxy.safePath(path),path);
         assertTrue(DevWebProxy.safePath("/learn")); assertTrue(DevWebProxy.safePath("/main-abcdef123.js"));
     }
+
+    /** DLV-969: before admission, only our sign-in and sign-up pages, their bundles and the auth routes behind them pass. */
+    @Test void ourSignInPagesTheirBundlesAndTheAuthRoutesPassBeforeAdmissionAndNothingElse() throws Exception {
+        for (String path : new String[]{"/sign-in", "/sign-up", "/sign-in/forgot", "/sign-in/reset", "/sign-in/new-password", "/sign-in/code",
+                "/sign-up/confirm", "/welcome", "/favicon.svg", "/favicon.ico", "/main-AB12cd_-.js", "/chunk-3NPQ_-3i.js", "/styles-ZX81QW2E.css",
+                "/polyfills-ABCDEFGH.js", "/worker-ABCDEFGH.js", "/api/v1/auth/options", "/bff/api/v1/auth/csrf"}) {
+            for (String method : new String[]{"GET", "HEAD"}) {
+                var req = request(path, null); req.setMethod(method);
+                var chain = new MockFilterChain(); filter().doFilter(req, new MockHttpServletResponse(), chain);
+                assertNotNull(chain.getRequest(), method + " " + path);
+            }
+        }
+        for (String path : new String[]{"/bff/api/v1/auth/password/sign-in", "/bff/api/v1/auth/password/challenge", "/bff/api/v1/auth/password/sign-up",
+                "/bff/api/v1/auth/password/sign-up/confirm", "/bff/api/v1/auth/password/sign-up/resend",
+                "/bff/api/v1/auth/password/password/forgot", "/bff/api/v1/auth/password/password/reset"}) {
+            var req = request(path, null); req.setMethod("POST");
+            var chain = new MockFilterChain(); filter().doFilter(req, new MockHttpServletResponse(), chain);
+            assertNotNull(chain.getRequest(), path);
+        }
+        // Still closed: other pages, lesson assets and content, other APIs, writes to the pages, source maps and look-alikes.
+        for (String[] attempt : new String[][]{{"GET", "/learn"}, {"GET", "/"}, {"GET", "/sign-in/choose"}, {"GET", "/sign-in/../learn"},
+                {"GET", "/assets/scenes/landing/a.svg"}, {"GET", "/assets/visual-code-presentation.js"}, {"GET", "/content/indexes/learn.json"},
+                {"GET", "/bff/api/v1/auth/me"}, {"POST", "/welcome"}, {"GET", "/welcome/extra"}, {"GET", "/main-ABCDEFGH.js.map"}, {"GET", "/main-ABC.js"}, {"GET", "/evil/main-ABCDEFGH.js"},
+                {"POST", "/sign-in"}, {"POST", "/main-ABCDEFGH.js"}, {"GET", "/bff/api/v1/auth/password/sign-in"}, {"POST", "/bff/api/v1/auth/password/other"}}) {
+            var req = request(attempt[1], null); req.setMethod(attempt[0]);
+            var chain = new MockFilterChain(); filter().doFilter(req, new MockHttpServletResponse(), chain);
+            assertNull(chain.getRequest(), attempt[0] + " " + attempt[1]);
+        }
+    }
 }

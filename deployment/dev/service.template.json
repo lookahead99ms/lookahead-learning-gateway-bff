@@ -315,6 +315,10 @@
                 }
               },
               {
+                "Name": "LOOKAHEAD_GOOGLE_SIGN_IN",
+                "Value": "true"
+              },
+              {
                 "Name": "LOOKAHEAD_DEV_STATE_TABLE",
                 "Value": {
                   "Ref": "DevStateTable"

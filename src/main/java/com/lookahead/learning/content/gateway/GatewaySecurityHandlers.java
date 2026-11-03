@@ -36,6 +36,15 @@ public class GatewaySecurityHandlers {
 
     void loginSucceeded(HttpServletRequest request, HttpServletResponse response,
                         Authentication authentication) throws IOException {
+        response.sendRedirect(settings.frontend() + completeSignIn(request, response, authentication));
+    }
+
+    /**
+     * The one sign-in completion shared by the OAuth callback and our own password page (DLV-969): DEV gate freshness,
+     * Domain admission, waiting accounts and sign-in challenges. Returns the same-origin path the browser goes to next;
+     * the OAuth callback redirects to it, the password route returns it as JSON.
+     */
+    String completeSignIn(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
         var session = request.getSession();
         session.setAttribute(LearnerIdleFilter.LAST_ACTIVITY, java.time.Instant.now());
         if(settings.cloud()) {
@@ -53,13 +62,14 @@ public class GatewaySecurityHandlers {
                 String challenge=admission.data().path("challengeToken").asString("");
                 if(!challenge.isEmpty()) {
                     if(!challenge.matches("[A-Za-z0-9_-]{43}"))throw new IllegalStateException("Invalid challenge");
+                    session=request.getSession();
                     session.setAttribute(CloudGatewaySessions.CHALLENGE,challenge);
                     Object saved=session.getAttribute("learningReturnTo");
                     String destination=GatewayConfiguration.safeReturn(saved instanceof String value?value:null);
-                    response.sendRedirect(settings.frontend()+"/sign-in/choose?returnTo="+java.net.URLEncoder.encode(destination,java.nio.charset.StandardCharsets.UTF_8));return;
+                    return "/sign-in/choose?returnTo="+java.net.URLEncoder.encode(destination,java.nio.charset.StandardCharsets.UTF_8);
                 }
                 if(admission.data().path("signInId").asString("").isEmpty())throw new IllegalStateException("Missing admission");
-                session.removeAttribute(CloudGatewaySessions.CHALLENGE);
+                request.getSession().removeAttribute(CloudGatewaySessions.CHALLENGE);
             } catch(RuntimeException rejected) {
                 boolean pending=rejected instanceof AdmissionPending;
                 clients.removeAuthorizedClient("lookahead",authentication,request,response);
@@ -67,18 +77,21 @@ public class GatewaySecurityHandlers {
                     // A waiting account never rides on a gate opened by an earlier sign-in in this browser.
                     Object kept=pending?null:previousGate;
                     DevAdmission.restore(request,kept);
-                    if(pending){response.sendRedirect(settings.frontend()+"/dev/access?access=pending");return;}
-                    response.sendRedirect(settings.frontend()+(DevAdmission.open(kept,java.time.Instant.now())?"/sign-in?error=admission":"/dev/access?error=signin"));return;
+                    // DLV-969: a waiting account sees the Look Ahead essence on /welcome while it waits; the gate card
+                    // /dev/access?access=pending still renders the same notice as a fallback.
+                    if(pending)return "/welcome?access=pending";
+                    return DevAdmission.open(kept,java.time.Instant.now())?"/sign-in?error=admission":"/dev/access?error=signin";
                 }
                 // No gate (PROD): end the learner sign-in; a waiting account lands on the landing page notice.
                 DevAdmission.clearLearner(request);
-                if(pending){response.sendRedirect(settings.frontend()+"/?access=pending");return;}
-                response.sendRedirect(settings.frontend()+"/sign-in?error=admission");return;
+                if(pending)return "/?access=pending";
+                return "/sign-in?error=admission";
             }
         }
+        session = request.getSession();
         Object saved = session.getAttribute("learningReturnTo");
         session.removeAttribute("learningReturnTo");
-        response.sendRedirect(settings.frontend() + GatewayConfiguration.safeReturn(saved instanceof String value ? value : null));
+        return GatewayConfiguration.safeReturn(saved instanceof String value ? value : null);
     }
 
     void loginFailed(HttpServletRequest request, HttpServletResponse response,

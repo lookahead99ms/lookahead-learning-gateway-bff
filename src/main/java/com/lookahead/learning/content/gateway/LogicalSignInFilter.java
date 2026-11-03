@@ -30,7 +30,9 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return !(path.startsWith("/bff/api/v1/") || path.startsWith("/bff/author/previews/")
                 || settings.cloud() && CloudGatewaySessions.restricted(request) && path.startsWith("/content/"))
-                || path.equals("/bff/api/v1/auth/logout");
+                || path.equals("/bff/api/v1/auth/logout")
+                // DLV-969: our password page starts a new sign-in; like /bff/login it must work from any prior state.
+                || path.startsWith("/bff/api/v1/auth/password/");
     }
 
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,

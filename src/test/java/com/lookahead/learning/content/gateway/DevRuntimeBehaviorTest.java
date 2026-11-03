@@ -72,7 +72,7 @@ class DevRuntimeBehaviorTest {
         String body=reply.getBody(),policy=reply.getHeaders().getFirst("Content-Security-Policy");
         // The page keeps its purpose and the admission link, and makes no network request of any kind.
         assertTrue(body.startsWith("<!doctype html>"));assertTrue(body.contains("<html lang=\"en\">"));assertTrue(body.contains("<meta name=\"viewport\""));
-        assertTrue(body.contains("Authorized users"));assertTrue(body.contains("href=\"/bff/login?provider=password&amp;returnTo=%2F\""));
+        assertTrue(body.contains("Authorized users"));assertTrue(body.contains("href=\"/sign-in?returnTo=%2F\""));
         assertTrue(body.contains("Sign in with email and password"));
         assertTrue(body.contains("One sign-in both opens DEV and signs you in to your account."));assertFalse(body.contains("/dev/oauth2/"));
         assertTrue(body.contains("aria-describedby=\"signin-hint\""));assertTrue(body.contains("id=\"signin-hint\""));
@@ -114,6 +114,11 @@ class DevRuntimeBehaviorTest {
         assertEquals(DevAccessPage.Notice.PENDING,DevAccessPage.Notice.from("pending","signin"));
         assertThrows(IllegalStateException.class,()->new DevAccessPage("<style>a</style><p>no marks</p>").render(false,DevAccessPage.Notice.NONE));
         assertThrows(IllegalStateException.class,()->new DevAccessPage("<style>a</style><!--notice--><!--/google--><!--google-->").render(true,DevAccessPage.Notice.NONE));
+    }
+    /** DLV-969: the gate card's waiting notice still renders as a fallback after waiting accounts moved to /welcome. */
+    @Test void gateCardStillShowsTheWaitingNoticeAsAFallback() {
+        String pending=new DevAccessController(environment(),mock(GatewayController.class)).access("pending",null).getBody();
+        assertTrue(pending.contains("The owner has to approve your access before DEV opens."));
     }
     MockEnvironment upstreams(){return new MockEnvironment().withProperty("app.oauth.domain-api-upstream","https://domain.lookahead-dev.internal:8443")
         .withProperty("app.gateway.web-upstream","https://web.lookahead-dev.internal:8443");}
