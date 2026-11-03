@@ -77,6 +77,12 @@ public class GatewayController {
         response.setHeader("Cache-Control","no-store");return ApiResponse.success(Map.of("logoutUrl",url));
     }
     private ApiResponse<Map<String,String>> cloudLogout(HttpServletRequest request,HttpServletResponse response,Authentication authentication) {
+        // DLV-969 S35: a test session has no provider sign-in; it ends here and the DEV gate stays open.
+        if(TestSessionController.active(authentication)) {
+            DevAdmission.clearLearner(request);
+            response.setHeader("Cache-Control","no-store");
+            return ApiResponse.success(Map.of("logoutUrl",settings.frontend()+"/sign-in","providerRevocationConfirmed","true"));
+        }
         var client=manager.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead").principal(authentication)
             .attributes(a->{a.put(HttpServletRequest.class.getName(),request);a.put(HttpServletResponse.class.getName(),response);}).build());
         boolean providerConfirmed=false;
@@ -129,7 +135,8 @@ public class GatewayController {
         // PUT exists only for platform reviews; every other route keeps its earlier methods.
         if("PUT".equals(request.getMethod()) && !platformReview)return ResponseEntity.status(405).header(HttpHeaders.CACHE_CONTROL,"no-store").build();
         if(!content && !account && !execution && !authorReview && !platformReview && !staffAccess && !membership && !directory)return ResponseEntity.notFound().build();
-        if ((directory || authorReview || platformReview || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken)) return ResponseEntity.status(401).build();
+        boolean testSession=settings.cloud() && TestSessionController.active(authentication);
+        if ((directory || authorReview || platformReview || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken) && !testSession) return ResponseEntity.status(401).build();
         int bodyLimit = (authorReview || staffAccess) ? 16 * 1024 : execution ? 512 * 1024 : platformReview ? PLATFORM_REVIEW_BODY_BYTES : 8 * 1024 * 1024;
         byte[] body=request.getInputStream().readNBytes(bodyLimit + 1);
         if(body.length>bodyLimit)return ResponseEntity.status(413).build();
@@ -144,6 +151,11 @@ public class GatewayController {
                     .attributes(attributes->{attributes.put(HttpServletRequest.class.getName(),request);attributes.put(HttpServletResponse.class.getName(),response);}).build());
             if(client==null)return ResponseEntity.status(401).build();
             outgoing.headers(headers->{headers.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,headers);});
+        } else if(testSession) {
+            // DLV-969 S35: the Domain acts as the test account only with the Gateway secret and this session's gate holder.
+            var session=new HttpHeaders();
+            if(!TestSessionController.apply(settings,request,authentication,session))return ResponseEntity.status(401).build();
+            outgoing.headers(headers->headers.addAll(session));
         }
         // No browser Authorization, Cookie, Origin, forwarding headers, or arbitrary upstream is relayed.
         return outgoing.body(body).exchange((sent,received)->{
