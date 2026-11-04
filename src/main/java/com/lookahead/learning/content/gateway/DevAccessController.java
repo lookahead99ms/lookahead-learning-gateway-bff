@@ -31,6 +31,9 @@ public final class DevAccessController {
             if (stored instanceof org.springframework.security.core.context.SecurityContext context
                     && context.getAuthentication() instanceof org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken auth) {
                 learner.logout(request, response, auth);
+            } else if (TestSessionController.staffSignIn(request) instanceof org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken staff) {
+                // DLV-969: leaving DEV from a test account also ends the staff sign-in kept aside behind it.
+                learner.logout(request, response, staff);
             }
         } catch (RuntimeException unavailable) {
             learnerConfirmed = false;

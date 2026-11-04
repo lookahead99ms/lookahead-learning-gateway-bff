@@ -60,6 +60,23 @@ class DevRuntimeBehaviorTest {
         assertTrue(result.getBody().get("logoutUrl").contains("learner.auth.us-east-2.amazoncognito.com/logout"));
         assertTrue(result.getBody().get("logoutUrl").contains("%2Fdev%2Fleave%2Fcomplete"));
     }
+    /** DLV-969 (2026-11-04): Exit DEV from a test account also ends the staff sign-in kept aside behind it. */
+    @Test void leaveFromATestAccountSignsOutTheStaffSignInKeptAside() {
+        var learner=mock(GatewayController.class);var controller=new DevAccessController(environment(),learner);
+        var request=new MockHttpServletRequest("POST","/dev/leave");var response=new MockHttpServletResponse();
+        var staff=auth();var session=(MockHttpSession)request.getSession();
+        session.setAttribute(TestSessionController.STAFF_SIGN_IN,staff);
+        var context=SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(new TestSessionController.TestSession("2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a"));
+        session.setAttribute("SPRING_SECURITY_CONTEXT",context);
+        var result=controller.leave(request,response);
+        verify(learner).logout(request,response,staff);
+        assertTrue(session.isInvalid());assertEquals("true",result.getBody().get("learnerSignOutConfirmed"));
+        // Signed out entirely (no sign-in, no test account): nothing to sign out of.
+        var nobody=mock(GatewayController.class);
+        new DevAccessController(environment(),nobody).leave(new MockHttpServletRequest("POST","/dev/leave"),new MockHttpServletResponse());
+        verifyNoInteractions(nobody);
+    }
     @Test void leaveCompletionReturnsToTheGateWithoutASecondProvider() throws Exception {
         // DLV-969: the learner provider is the gate's provider, so nothing is left to log out of after /dev/leave.
         var controller=new DevAccessController(environment(),mock(GatewayController.class));var response=new MockHttpServletResponse();
