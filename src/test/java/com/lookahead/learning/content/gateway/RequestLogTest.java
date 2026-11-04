@@ -180,6 +180,55 @@ class RequestLogTest {
         assertThat(capture.list.toString()).doesNotContain("secret-token");
     }
 
+    @Test void everyFailureSaysItsCodeAndWhyInWords() throws Exception {
+        run(new MockHttpServletRequest("POST", "/bff/api/v1/admin/test-accounts/x/delete"), (req, res) -> {
+            var answer = (HttpServletResponse) res;
+            answer.setStatus(403);
+            answer.setContentType("application/json");
+            answer.getWriter().write("{\"status\":403,\"code\":\"DELETE_FORBIDDEN\",\"message\":\"Only the owner or the person who created this test account can delete it.\"}");
+        });
+        run(new MockHttpServletRequest("GET", "/bff/api/v1/me"), (req, res) -> ((HttpServletResponse) res).sendError(401, "Full authentication is required"));
+        run(new MockHttpServletRequest("POST", "/bff/api/v1/payments/refund"), (req, res) -> ((HttpServletResponse) res).setStatus(501));
+        run(new MockHttpServletRequest("POST", "/bff/api/v1/auth/password/sign-in"), (req, res) -> {
+            ((HttpServletResponse) res).setStatus(429);
+            res.getOutputStream().write("{\"code\":\"TOO_MANY_REQUESTS\",\"message\":\"Too many tries for priya@example.invalid. Wait a minute.\"}".getBytes(StandardCharsets.UTF_8));
+        });
+        assertThat(capture.list).extracting(ILoggingEvent::getFormattedMessage).map(m -> m.replaceAll(" in \\d+ ms$", "")).containsExactly(
+                "POST /bff/api/v1/admin/test-accounts/x/delete -> 403 DELETE_FORBIDDEN: Only the owner or the person who created this test account can delete it.",
+                "GET /bff/api/v1/me -> 401 HTTP_401: Full authentication is required",
+                "POST /bff/api/v1/payments/refund -> 501 HTTP_501: Not implemented: this action is not available in this environment",
+                "POST /bff/api/v1/auth/password/sign-in -> 429 TOO_MANY_REQUESTS: Too many tries for [email]. Wait a minute.");
+        assertThat(capture.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.WARN, Level.INFO, Level.WARN, Level.WARN);
+        assertThat(pairs(capture.list.getFirst())).contains("error.code=DELETE_FORBIDDEN", "http.status=403");
+        assertThat(capture.list.toString()).doesNotContain("priya@");
+    }
+
+    @Test void successfulAnswersAreNeverCopiedAndAnErrorBodyIsReadOnlyUpToTheLimit() throws Exception {
+        var big = "x".repeat(10_000);
+        run(new MockHttpServletRequest("GET", "/learn"), (req, res) -> res.getWriter().write("{\"code\":\"NOT_AN_ERROR\"}" + big));
+        run(new MockHttpServletRequest("GET", "/bff/api/v1/plans"), (req, res) -> {
+            ((HttpServletResponse) res).setStatus(409);
+            res.getWriter().write(big + "{\"code\":\"TOO_LATE\"}");
+            res.flushBuffer();
+        });
+        assertThat(capture.list.getFirst().getFormattedMessage()).doesNotContain("NOT_AN_ERROR");
+        assertThat(capture.list.getLast().getFormattedMessage()).contains("409 HTTP_409: Conflict with the current state").doesNotContain("TOO_LATE");
+        assertThat(StatusReason.describe(418)).isEqualTo("HTTP 418");
+        assertThat(StatusReason.mask("a".repeat(400))).hasSize(301);
+    }
+
+    @Test void theWrapperStillWritesEverythingThroughUnchanged() throws Exception {
+        var response = run(new MockHttpServletRequest("GET", "/bff/api/v1/x"), (req, res) -> {
+            ((HttpServletResponse) res).setStatus(404);
+            res.getOutputStream().write('{');
+            res.getOutputStream().write("\"code\":\"NO_SUCH_PLAN\"}".getBytes(StandardCharsets.UTF_8), 0, 22);
+            res.getOutputStream().flush();
+            assertThat(res.getOutputStream().isReady()).isTrue();
+        });
+        assertThat(response.getContentAsString()).isEqualTo("{\"code\":\"NO_SUCH_PLAN\"}");
+        assertThat(capture.list.getLast().getFormattedMessage()).contains("404 NO_SUCH_PLAN: Not found");
+    }
+
     /** The DEV profile's own settings render one JSON record per line, with the request ID, and ERROR stays findable. */
     @Test void theDevProfileWritesOneTidyJsonRecordPerLine() throws Exception {
         var environment = new MockEnvironment();

@@ -104,10 +104,24 @@ class CloudGatewaySecurityIntegrationTest {
     }
     @Test void cloudMutationsRequireOwnSessionCsrfBeforeAnyUpstreamCall()throws Exception {
         var session=session(false);String token=csrf(session), other=csrf(session(false));
-        for(String path:new String[]{"/api/v1/account/profile","/api/v1/account/password","/api/v1/account/sign-ins/revoke","/api/v1/auth/sign-in-challenge/replace"}){
-            mvc.perform(post(path).session(session).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
-            mvc.perform(post(path).session(session).header("X-CSRF-TOKEN",other).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
-        }
+        var events=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var capture=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();capture.start();events.addAppender(capture);
+        try {
+            for(String path:new String[]{"/api/v1/account/profile","/api/v1/account/password","/api/v1/account/sign-ins/revoke","/api/v1/auth/sign-in-challenge/replace"}){
+                mvc.perform(post(path).session(session).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+                mvc.perform(post(path).session(session).header("X-CSRF-TOKEN",other).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+            }
+        } finally {events.detachAppender(capture);}
+        // DLV-969: each REQUEST_REJECTED says which check failed, as a reason code; never the token or the exception's type name.
+        assertThat(capture.list).hasSize(8).allSatisfy(line->{
+            assertThat(line.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(line.getFormattedMessage()).doesNotContain(other).doesNotContain("Exception");
+        });
+        assertThat(capture.list.get(0).getFormattedMessage()).isEqualTo("Request rejected with REQUEST_REJECTED: POST /api/v1/account/profile (no CSRF token was sent, or it does not match this session's)");
+        assertThat(capture.list).allSatisfy(line->assertThat(OpsLogTest.pairs(line)).contains("event.action=request.rejected","reason=CSRF_TOKEN_MISMATCH"));
+        assertThat(GatewaySecurityHandlers.rejection(new org.springframework.security.web.csrf.MissingCsrfTokenException(null))).isEqualTo("CSRF_NO_SESSION_TOKEN");
+        assertThat(GatewaySecurityHandlers.rejection(new org.springframework.security.web.csrf.CsrfException("x"))).isEqualTo("CSRF_REJECTED");
+        assertThat(GatewaySecurityHandlers.rejection(new org.springframework.security.access.AccessDeniedException("x"))).isEqualTo("ROUTE_NOT_ALLOWED");
         upstream("profile","{\"data\":{\"displayName\":\"Learner\"}}");
         mvc.perform(post("/api/v1/account/profile").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"Learner\"}")).andExpect(status().isOk());fixture.server.verify();
     }
@@ -231,7 +245,15 @@ class CloudGatewaySecurityIntegrationTest {
         var gated=new GatewaySecurityHandlers(settings,clients,http,java.util.Optional.of(DevGate.freshSignIn(java.time.Clock.systemUTC())));
         fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
             .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"ACCOUNT_ADMISSION_REQUIRED\"}"));
-        gated.loginSucceeded(request,response,auth);
+        var events=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var capture=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();capture.start();events.addAppender(capture);
+        try {gated.loginSucceeded(request,response,auth);} finally {events.detachAppender(capture);}
+        // DLV-969: the waiting account is logged as Domain's refusal code, in words, with the provider and the door.
+        var waiting=capture.list.getLast();
+        assertThat(waiting.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+        assertThat(waiting.getFormattedMessage()).isEqualTo("Sign-in refused by Domain (password via password-page): ACCOUNT_ADMISSION_REQUIRED, the account is waiting for the owner to admit it");
+        assertThat(OpsLogTest.pairs(waiting)).contains("event.action=sign-in.completed","event.outcome=refused","reason=ACCOUNT_ADMISSION_REQUIRED","upstream.status=403");
+        assertThat(capture.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).noneMatch(m->m.contains("author@lookahead.dev")||m.contains("synthetic-access"));
         // DLV-969: the waiting account lands on the Web welcome page (the Look Ahead essence), not the gate card.
         assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/welcome?access=pending");
         assertThat(request.getSession(false)).isNull();
@@ -243,12 +265,23 @@ class CloudGatewaySecurityIntegrationTest {
         clients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),auth.getName(),
             new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,"synthetic-access",now,now.plusSeconds(300))),auth,heldRequest,heldResponse);
         fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withServerError());
-        gated.loginSucceeded(heldRequest,heldResponse,auth);
+        capture.list.clear();events.addAppender(capture);
+        try {gated.loginSucceeded(heldRequest,heldResponse,auth);} finally {events.detachAppender(capture);}
+        assertThat(capture.list.getLast().getFormattedMessage()).isEqualTo("Sign-in refused (password via password-page): DOMAIN_REFUSED");
+        assertThat(OpsLogTest.pairs(capture.list.getLast())).contains("upstream.status=500");
         assertThat(heldResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in?error=admission");
         assertThat(heldRequest.getSession(false).getAttribute(DevAdmission.ATTRIBUTE)).isEqualTo(earlier);fixture.server.verify();
         // A failed provider sign-in outside an open gate returns to the gate page; inside one, to the Web sign-in page.
         var outside=new MockHttpServletRequest();var outsideResponse=new MockHttpServletResponse();
-        gated.loginFailed(outside,outsideResponse,new org.springframework.security.authentication.BadCredentialsException("synthetic"));
+        capture.list.clear();events.addAppender(capture);
+        try {
+            gated.loginFailed(outside,outsideResponse,new org.springframework.security.authentication.BadCredentialsException("synthetic"));
+            gated.loginFailed(new MockHttpServletRequest(),new MockHttpServletResponse(),new org.springframework.security.oauth2.core.OAuth2AuthenticationException(
+                new org.springframework.security.oauth2.core.OAuth2Error("invalid_state_parameter","synthetic description",null)));
+        } finally {events.detachAppender(capture);}
+        assertThat(capture.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+            .containsExactly("OAuth sign-in failed at the callback: authentication_failed","OAuth sign-in failed at the callback: invalid_state_parameter");
+        assertThat(OpsLogTest.pairs(capture.list.getLast())).contains("reason=OAUTH_INVALID_STATE_PARAMETER");
         assertThat(outsideResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/dev/access?error=signin");
         var inside=new MockHttpServletRequest();inside.getSession().setAttribute(DevAdmission.ATTRIBUTE,earlier);var insideResponse=new MockHttpServletResponse();
         gated.loginFailed(inside,insideResponse,new org.springframework.security.authentication.BadCredentialsException("synthetic"));

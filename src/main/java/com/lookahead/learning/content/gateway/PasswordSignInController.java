@@ -103,9 +103,9 @@ public class PasswordSignInController {
 
     @PostMapping("/sign-in")
     public ResponseEntity<?> signIn(HttpServletRequest request, HttpServletResponse response) {
-        return handle(request, body -> {
+        return handle(request, "sign-in.password", body -> {
             String email = email(body), password = secret(body, "password"), returnTo = GatewayConfiguration.safeReturn(text(body, "returnTo", 2048, true));
-            if (!throttle.allow(address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
+            if (!throttle.allow("sign-in.password", address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
             var result = cognito.signIn(email, password);
             return next(request, response, email, returnTo, result.challengeName(), result.session(), result.authenticationResult());
         });
@@ -113,13 +113,13 @@ public class PasswordSignInController {
 
     @PostMapping("/challenge")
     public ResponseEntity<?> challenge(HttpServletRequest request, HttpServletResponse response) {
-        return handle(request, body -> {
+        return handle(request, "sign-in.challenge", body -> {
             var session = request.getSession(false);
             if (session == null || !(session.getAttribute(PENDING) instanceof Pending pending) || !pending.expires().isAfter(clock.instant())) {
                 if (session != null) session.removeAttribute(PENDING);
                 return failure(400, "STEP_EXPIRED");
             }
-            if (!throttle.allow(address(request), pending.username())) return failure(429, "TOO_MANY_REQUESTS");
+            if (!throttle.allow("sign-in.challenge", address(request), pending.username())) return failure(429, "TOO_MANY_REQUESTS");
             var challenge = ChallengeNameType.fromValue(pending.challenge());
             Map<String, String> answers = switch (challenge) {
                 case NEW_PASSWORD_REQUIRED -> Map.of("NEW_PASSWORD", secret(body, "newPassword"));
@@ -135,9 +135,9 @@ public class PasswordSignInController {
 
     @PostMapping("/sign-up")
     public ResponseEntity<?> signUp(HttpServletRequest request) {
-        return handle(request, body -> {
+        return handle(request, "sign-up.started", body -> {
             String email = email(body), password = secret(body, "password"), first = name(body, "firstName"), last = name(body, "lastName");
-            if (!throttle.allow(address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
+            if (!throttle.allow("sign-up.started", address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
             var result = cognito.signUp(email, password, first, last);
             return step("CODE_SENT", destination(result.codeDeliveryDetails(), email));
         });
@@ -145,9 +145,9 @@ public class PasswordSignInController {
 
     @PostMapping("/sign-up/confirm")
     public ResponseEntity<?> confirm(HttpServletRequest request) {
-        return handle(request, body -> {
+        return handle(request, "sign-up.confirmed", body -> {
             String email = email(body), code = code(body);
-            if (!throttle.allow(address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
+            if (!throttle.allow("sign-up.confirmed", address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
             cognito.confirmSignUp(email, code);
             // The password is never kept between requests, so the person signs in once more after confirming.
             return step("SIGN_IN", null);
@@ -156,9 +156,9 @@ public class PasswordSignInController {
 
     @PostMapping("/sign-up/resend")
     public ResponseEntity<?> resend(HttpServletRequest request) {
-        return handle(request, body -> {
+        return handle(request, "sign-up.code-resent", body -> {
             String email = email(body);
-            if (!throttle.allow(address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
+            if (!throttle.allow("sign-up.code-resent", address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
             var result = cognito.resend(email);
             return step("CODE_SENT", destination(result.codeDeliveryDetails(), email));
         });
@@ -166,9 +166,9 @@ public class PasswordSignInController {
 
     @PostMapping("/password/forgot")
     public ResponseEntity<?> forgot(HttpServletRequest request) {
-        return handle(request, body -> {
+        return handle(request, "password-reset.requested", body -> {
             String email = email(body);
-            if (!throttle.allow(address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
+            if (!throttle.allow("password-reset.requested", address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
             try {
                 var result = cognito.forgot(email);
                 return step("CODE_SENT", destination(result.codeDeliveryDetails(), email));
@@ -181,9 +181,9 @@ public class PasswordSignInController {
 
     @PostMapping("/password/reset")
     public ResponseEntity<?> reset(HttpServletRequest request, HttpServletResponse response) {
-        return handle(request, body -> {
+        return handle(request, "password-reset.completed", body -> {
             String email = email(body), code = code(body), password = secret(body, "newPassword"), returnTo = GatewayConfiguration.safeReturn(text(body, "returnTo", 2048, true));
-            if (!throttle.allow(address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
+            if (!throttle.allow("password-reset.completed", address(request), email)) return failure(429, "TOO_MANY_REQUESTS");
             cognito.reset(email, code, password);
             // The new password is in this request; signing in with it now saves a second form, and nothing is stored.
             var result = cognito.signIn(email, password);
@@ -236,25 +236,62 @@ public class PasswordSignInController {
 
     interface Action { ResponseEntity<?> apply(JsonNode body); }
 
-    private ResponseEntity<?> handle(HttpServletRequest request, Action action) {
+    /** Runs one page route and writes its {@code lookahead.event} line: the outcome and the stable reason, never the input. */
+    private ResponseEntity<?> handle(HttpServletRequest request, String event, Action action) {
         JsonNode body;
         try {
             byte[] raw = request.getInputStream().readNBytes(MAX_BODY + 1);
-            if (raw.length > MAX_BODY) return failure(413, "REQUEST_TOO_LARGE");
+            if (raw.length > MAX_BODY) return outcome(event, failure(413, "REQUEST_TOO_LARGE"), null);
             body = json.readTree(raw);
-            if (body == null || !body.isObject()) return failure(400, "INVALID_REQUEST");
+            if (body == null || !body.isObject()) return outcome(event, failure(400, "INVALID_REQUEST"), null);
         } catch (IOException | RuntimeException unreadable) {
-            return failure(400, "INVALID_REQUEST");
+            return outcome(event, failure(400, "INVALID_REQUEST"), null);
         }
         try {
-            return action.apply(body);
+            return outcome(event, action.apply(body), null);
         } catch (IllegalArgumentException invalid) {
-            return failure(400, "INVALID_REQUEST");
+            return outcome(event, failure(400, "INVALID_REQUEST"), null);
         } catch (CognitoIdentityProviderException rejected) {
-            return mapped(rejected);
+            var answer = mapped(rejected);
+            if (answer.getStatusCode().value() == 429)
+                OpsLog.limit("cognito", 0, null, event, "Rate limit reached: {} refused by Cognito ({})", event, OpsLog.awsCode(rejected));
+            return outcome(event, answer, null);
         } catch (RuntimeException unavailable) {
-            return failure(503, "SERVICE_UNAVAILABLE");
+            return outcome(event, failure(503, "SERVICE_UNAVAILABLE"), RequestLog.types(unavailable));
         }
+    }
+
+    /** What each route is, in words, for the log line. */
+    private static final Map<String, String> ROUTES = Map.of("sign-in.password", "Password sign-in",
+        "sign-in.challenge", "Sign-in step (new password or code)", "sign-up.started", "Sign-up",
+        "sign-up.confirmed", "Sign-up code confirmation", "sign-up.code-resent", "Sign-up code resend",
+        "password-reset.requested", "Password reset request", "password-reset.completed", "Password reset");
+    /** The next step the page is sent to, in words. */
+    private static final Map<String, String> STEPS = Map.of("SIGNED_IN", "signed in with Cognito, finishing the sign-in",
+        "CODE_SENT", "code sent", "SIGN_IN", "the person signs in next", "NEW_PASSWORD", "Cognito requires a new password",
+        "APP_CODE", "Cognito requires an authenticator app code", "EMAIL_CODE", "Cognito requires an emailed code");
+    /** Each refusal code, in words. */
+    private static final Map<String, String> WHY = Map.ofEntries(Map.entry("INVALID_CREDENTIALS", "wrong email or password"),
+        Map.entry("USER_NOT_CONFIRMED", "the account has not confirmed its email yet"), Map.entry("CODE_MISMATCH", "wrong code"),
+        Map.entry("CODE_EXPIRED", "the code expired"), Map.entry("INVALID_PASSWORD", "the password breaks the password rules"),
+        Map.entry("USERNAME_EXISTS", "an account with this email already exists"), Map.entry("TOO_MANY_REQUESTS", "too many attempts"),
+        Map.entry("STEP_EXPIRED", "the sign-in step expired or was already used"), Map.entry("INVALID_REQUEST", "the form was malformed or a field failed validation"),
+        Map.entry("REQUEST_TOO_LARGE", "the request was too large"), Map.entry("SERVICE_UNAVAILABLE", "Cognito or the sign-in completion was unavailable or answered unexpectedly"));
+
+    static ResponseEntity<?> outcome(String event, ResponseEntity<?> answer, String types) {
+        int status = answer.getStatusCode().value();
+        String what = ROUTES.getOrDefault(event, event);
+        if (status < 400) {
+            String step = answer.getBody() instanceof ApiResponse<?> api && api.data() instanceof Map<?, ?> data && data.get("step") instanceof String value ? value : "DONE";
+            OpsLog.success(event).addKeyValue("step", step).log("{} succeeded: {}", what, STEPS.getOrDefault(step, step));
+            return answer;
+        }
+        String reason = answer.getBody() instanceof Map<?, ?> body && body.get("code") instanceof String code ? code : "HTTP_" + status;
+        var line = status >= 500 ? OpsLog.failed(event, reason) : OpsLog.refused(event, reason);
+        if (types != null) line = line.addKeyValue("exception.types", types);
+        line.addKeyValue("http.status", status).log("{} {}: {} ({}){}", what, status >= 500 ? "failed" : "refused", reason,
+            WHY.getOrDefault(reason, "HTTP " + status), types == null ? "" : " after " + types);
+        return answer;
     }
 
     /** Cognito's answers in the page's vocabulary; never the provider's own message, which may name the account. */

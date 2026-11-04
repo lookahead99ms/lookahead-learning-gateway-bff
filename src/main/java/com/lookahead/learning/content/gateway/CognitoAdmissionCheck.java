@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.UserNotFoun
 /**
  * DLV-969: the DEV gate's five-minute question to the Look Ahead pool, with the task role (IAM #7: AdminGetUser on
  * exactly the issuer's pool). A user the owner deleted is gone and a user they disabled is not enabled; both lose the gate.
+ * Each call writes one {@code lookahead.upstream} line; the SDK makes no retries here.
  */
 final class CognitoAdmissionCheck implements DevAdmission.Account {
     private final CognitoIdentityProviderClient client;
@@ -37,7 +38,8 @@ final class CognitoAdmissionCheck implements DevAdmission.Account {
 
     @Override public boolean allowed(String username) {
         try {
-            return Boolean.TRUE.equals(client.adminGetUser(AdminGetUserRequest.builder().userPoolId(poolId).username(username).build()).enabled());
+            var user = OpsLog.aws("cognito", "AdminGetUser", () -> client.adminGetUser(AdminGetUserRequest.builder().userPoolId(poolId).username(username).build()));
+            return Boolean.TRUE.equals(user.enabled());
         } catch (UserNotFoundException deleted) {
             return false;
         }

@@ -103,14 +103,14 @@ public class TestSessionController {
     public ResponseEntity<byte[]> start(@RequestBody(required = false) Start body, HttpServletRequest request, HttpServletResponse response,
             Authentication authentication) {
         String holder = holder(request);
-        if (holder == null) return failure(401, "DEV_ADMISSION_REQUIRED", "Open DEV first.");
+        if (holder == null) return refused("test-session.start", failure(401, "DEV_ADMISSION_REQUIRED", "Open DEV first."), "the DEV gate is not open in this session");
         UUID account;
         try { account = UUID.fromString(body.accountId()); }
-        catch (RuntimeException invalid) { return failure(422, "TEST_ACCOUNT_REQUIRED", "Choose a test account."); }
+        catch (RuntimeException invalid) { return refused("test-session.start", failure(422, "TEST_ACCOUNT_REQUIRED", "Choose a test account."), "no valid test account id was sent"); }
         var answer = relay(() -> http.post().uri(settings.domainApiUpstream() + "/internal/v1/test-sessions/start")
                 .headers(headers -> domain(headers, holder)).contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("accountId", account.toString())));
-        if (answer.getStatusCode().value() != 200) return answer;
+        if (answer.getStatusCode().value() != 200) return refused("test-session.start", answer, "Domain refused the switch");
         // Who this session is changes, so its id rotates, as at sign-in; the gate admission stays in the session. Switching from
         // your own sign-in keeps it aside; switching between test accounts keeps the one already there.
         request.changeSessionId();
@@ -119,6 +119,16 @@ public class TestSessionController {
         context.setAuthentication(new TestSession(account.toString()));
         SecurityContextHolder.getContextHolderStrategy().setContext(context);
         contexts.saveContext(context, request, response);
+        // DLV-969: test account ids are UUIDs, never names; the staff sign-in is described, not identified.
+        if (authentication instanceof TestSession previous)
+            OpsLog.success("test-session.switched").addKeyValue("testAccount.id", account.toString()).addKeyValue("testAccount.previousId", previous.accountId)
+                .addKeyValue("from", "test-account").log("Test session switched from test account {} to test account {}", previous.accountId, account);
+        else if (authentication instanceof OAuth2AuthenticationToken)
+            OpsLog.success("test-session.switched").addKeyValue("testAccount.id", account.toString()).addKeyValue("from", "own-sign-in")
+                .log("Test session started from the staff sign-in: now using test account {} (the staff sign-in is kept for Back to my account)", account);
+        else
+            OpsLog.success("test-session.started").addKeyValue("testAccount.id", account.toString()).addKeyValue("from", "signed-out")
+                .log("Test session started while signed out: now using test account {}", account);
         return json(200, "{\"data\":{\"next\":\"/\"}}".getBytes(StandardCharsets.UTF_8));
     }
 
@@ -128,10 +138,13 @@ public class TestSessionController {
      */
     @PostMapping("/bff/api/v1/auth/test-session/end")
     public ResponseEntity<byte[]> end(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
-        if (!active(authentication)) return failure(409, "NO_TEST_SESSION", "No test account is in use.");
+        if (!active(authentication)) return refused("test-session.end", failure(409, "NO_TEST_SESSION", "No test account is in use."), "no test account is in use");
+        String using = ((TestSession) authentication).accountId;
         var staff = staffSignIn(request);
         if (staff == null) {
             DevAdmission.clearLearner(request);
+            OpsLog.success("test-session.ended").addKeyValue("testAccount.id", using)
+                .log("Test session ended: test account {} signed out, no staff sign-in to return to; the DEV gate stays open", using);
             return json(200, "{\"data\":{\"next\":\"/sign-in\"}}".getBytes(StandardCharsets.UTF_8));
         }
         request.changeSessionId();
@@ -140,7 +153,19 @@ public class TestSessionController {
         context.setAuthentication(staff);
         SecurityContextHolder.getContextHolderStrategy().setContext(context);
         contexts.saveContext(context, request, response);
+        OpsLog.success("test-session.back").addKeyValue("testAccount.id", using)
+            .log("Back to my account: left test account {} and restored the staff sign-in", using);
         return json(200, "{\"data\":{\"next\":\"/\"}}".getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Logs a refused test-session request with its code (ours or Domain's) at WARN, or a Domain outage as a failure. */
+    private static ResponseEntity<byte[]> refused(String action, ResponseEntity<byte[]> answer, String why) {
+        int status = answer.getStatusCode().value();
+        String code = OpsLog.code(answer.getBody());
+        if (code == null) code = "HTTP_" + status;
+        (status >= 500 ? OpsLog.failed(action, code) : OpsLog.refused(action, code)).addKeyValue("http.status", status)
+            .log("Test session request refused: {} ({}, HTTP {})", code, status >= 500 ? "the test-session service was unavailable" : why, status);
+        return answer;
     }
 
     private void domain(HttpHeaders headers, String holder) {
@@ -157,6 +182,8 @@ public class TestSessionController {
                 return json(status >= 500 ? 503 : status, bytes);
             });
         } catch (RuntimeException unavailable) {
+            OpsLog.failed("test-session.domain", "DOMAIN_UNAVAILABLE").addKeyValue("exception.types", RequestLog.types(unavailable))
+                .log("Test session request could not reach Domain ({})", RequestLog.types(unavailable));
             return failure(503, "SERVICE_UNAVAILABLE", "Test accounts are unavailable. Retry shortly.");
         }
     }

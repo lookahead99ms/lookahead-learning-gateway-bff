@@ -116,6 +116,78 @@ class DevAdmissionTest {
         DevAdmission.clearLearner(unadmitted); assertNull(unadmitted.getSession(false));
         DevAdmission.clearLearner(new MockHttpServletRequest("GET", "/"));
     }
+    /** DLV-969 (owner, 2026-11-04): gate opened, refused, rechecked, closed and expired, each with a reason and never who. */
+    @Test void everyGateDecisionIsLoggedWithItsReason() throws Exception {
+        var events = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var capture = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>(); capture.start(); events.addAppender(capture);
+        try {
+            var gate = DevGate.freshSignIn(Clock.fixed(now, ZoneOffset.UTC));
+            gate.admit(new MockHttpServletRequest("GET", "/login/oauth2/code/lookahead"), user(now.minusSeconds(30)));
+            assertEquals("DEV gate opened for a fresh sign-in: open for 8 hours, rechecked every 5 minutes", capture.list.getLast().getFormattedMessage());
+            assertEquals(ch.qos.logback.classic.Level.INFO, capture.list.getLast().getLevel());
+            assertThrows(IllegalStateException.class, () -> gate.admit(new MockHttpServletRequest(), user(now.minusSeconds(600))));
+            var stale = capture.list.getLast();
+            assertEquals(ch.qos.logback.classic.Level.WARN, stale.getLevel());
+            assertEquals("DEV gate refused: STALE_SIGN_IN (the gate opens only for a sign-in made in the last 120 s)", stale.getFormattedMessage());
+            assertTrue(OpsLogTest.pairs(stale).containsAll(java.util.List.of("event.action=dev-gate.admitted", "event.outcome=refused", "reason=STALE_SIGN_IN", "signIn.ageSeconds=600")));
+            assertThrows(IllegalStateException.class, () -> gate.admit(new MockHttpServletRequest(), user(now.plusSeconds(60))));
+            assertTrue(OpsLogTest.pairs(capture.list.getLast()).contains("reason=SIGN_IN_TIME_AHEAD"));
+            assertThrows(IllegalStateException.class, () -> gate.admit(new MockHttpServletRequest(), user(null)));
+            assertTrue(OpsLogTest.pairs(capture.list.getLast()).contains("reason=MISSING_AUTH_TIME"));
+
+            // Recheck passed, then the user is disabled, then the pool does not answer.
+            var allowed = new java.util.concurrent.atomic.AtomicReference<Boolean>(true);
+            var filter = new DevAdmission(Clock.fixed(now, ZoneOffset.UTC), username -> { if (allowed.get() == null) throw new IllegalStateException("down " + username); return allowed.get(); });
+            filter.doFilter(request("/", now.minusSeconds(600)), new MockHttpServletResponse(), new MockFilterChain());
+            assertEquals("DEV gate recheck passed: the user is still enabled in the sign-in pool", capture.list.getLast().getFormattedMessage());
+            allowed.set(null);
+            filter.doFilter(request("/", now.minusSeconds(600)), new MockHttpServletResponse(), new MockFilterChain());
+            assertEquals("DEV gate recheck could not reach the sign-in pool (IllegalStateException); the session continues and the next request asks again",
+                capture.list.getLast().getFormattedMessage());
+            assertTrue(OpsLogTest.pairs(capture.list.getLast()).contains("reason=PROVIDER_UNAVAILABLE"));
+            allowed.set(false);
+            filter.doFilter(request("/", now.minusSeconds(600)), new MockHttpServletResponse(), new MockFilterChain());
+            assertEquals("DEV gate closed: the 5-minute recheck found the user disabled or deleted in the sign-in pool; session ended", capture.list.getLast().getFormattedMessage());
+            assertEquals(ch.qos.logback.classic.Level.WARN, capture.list.getLast().getLevel());
+            // The 8-hour window ends; a browser with no admission is refused at INFO.
+            filter().doFilter(request("/learn", now.minusSeconds(8 * 3600)), new MockHttpServletResponse(), new MockFilterChain());
+            assertEquals("DEV gate closed: the 8-hour window ended; session ended", capture.list.getLast().getFormattedMessage());
+            assertTrue(OpsLogTest.pairs(capture.list.getLast()).contains("reason=WINDOW_EXPIRED"));
+            filter().doFilter(request("/learn", null), new MockHttpServletResponse(), new MockFilterChain());
+            assertEquals("DEV gate closed for GET /learn: no admission in this browser session", capture.list.getLast().getFormattedMessage());
+            assertEquals(ch.qos.logback.classic.Level.INFO, capture.list.getLast().getLevel());
+        } finally { events.detachAppender(capture); }
+        for (var line : capture.list) {
+            assertFalse(line.getFormattedMessage().contains("tester") || line.getFormattedMessage().contains("person@example.invalid"), line.getFormattedMessage());
+            assertTrue(OpsLogTest.pairs(line).stream().noneMatch(pair -> pair.contains("person@example.invalid") || pair.contains("subject")), line.getFormattedMessage());
+        }
+    }
+
+    /** DLV-969: 30 idle minutes end the learner sign-in, and the line says so. */
+    @Test void anIdleSignInEndsWithALogLine() throws Exception {
+        var events = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var capture = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>(); capture.start(); events.addAppender(capture);
+        try {
+            for (Object last : new Object[]{now.minusSeconds(1800), null}) {
+                var req = request("/learn", now); req.getSession().setAttribute(LearnerIdleFilter.LAST_ACTIVITY, last);
+                var context = org.springframework.security.core.context.SecurityContextHolder.createEmptyContext();
+                context.setAuthentication(new org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken(user(now), java.util.List.of(), "lookahead"));
+                org.springframework.security.core.context.SecurityContextHolder.setContext(context);
+                new LearnerIdleFilter(Clock.fixed(now, ZoneOffset.UTC)).doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+            }
+        } finally { events.detachAppender(capture); org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+        assertEquals("Signed out after 30 idle minutes: the learner sign-in ended, the DEV gate stays open", capture.list.get(0).getFormattedMessage());
+        assertTrue(OpsLogTest.pairs(capture.list.get(0)).contains("reason=IDLE_TIMEOUT"));
+        assertTrue(OpsLogTest.pairs(capture.list.get(1)).contains("reason=NO_ACTIVITY_RECORDED"));
+    }
+
+    org.springframework.security.oauth2.core.oidc.user.OidcUser user(Instant authTime) {
+        var claims = new java.util.HashMap<String, Object>(java.util.Map.of("sub", "subject", "cognito:username", "person@example.invalid"));
+        if (authTime != null) claims.put("auth_time", authTime);
+        var token = new org.springframework.security.oauth2.core.oidc.OidcIdToken("synthetic-id-token", now.minusSeconds(5), now.plusSeconds(300), claims);
+        return new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(java.util.List.of(), token, "sub");
+    }
+
     @Test void staticProxyRejectsReservedAndAmbiguousTargets() {
         for(String path:new String[]{"//evil", "/bff/private", "/content/private", "/%2e%2e", "/x/../y", "/dev/access", "/.git/config", "/key.pem"})
             assertFalse(DevWebProxy.safePath(path),path);

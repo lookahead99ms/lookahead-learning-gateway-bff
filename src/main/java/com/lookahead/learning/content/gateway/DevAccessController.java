@@ -37,11 +37,15 @@ public final class DevAccessController {
             }
         } catch (RuntimeException unavailable) {
             learnerConfirmed = false;
+            OpsLog.failed("dev-gate.exit", "SIGN_OUT_UNCONFIRMED").addKeyValue("exception.types", RequestLog.types(unavailable))
+                .log("Exit DEV: the platform sign-out could not be confirmed ({}); the session ends anyway", RequestLog.types(unavailable));
         } finally {
             var remaining = request.getSession(false);
             if (remaining != null) remaining.invalidate();
             org.springframework.security.core.context.SecurityContextHolder.clearContext();
         }
+        OpsLog.success("dev-gate.exit").addKeyValue("signOut.confirmed", learnerConfirmed)
+            .log("Exit DEV: the DEV gate closed and the session ended; platform sign-out confirmed: {}", learnerConfirmed);
         // Log out of the learner provider, which is also the gate's provider since DLV-969. No token travels in a URL.
         String target = environment.getRequiredProperty("app.cognito.managed-login") + "/logout?client_id="
             + encode(environment.getRequiredProperty("app.oauth.client-id")) + "&logout_uri="

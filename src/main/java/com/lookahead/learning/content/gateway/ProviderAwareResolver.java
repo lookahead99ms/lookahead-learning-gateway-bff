@@ -44,9 +44,19 @@ final class ProviderAwareResolver implements OAuth2AuthorizationRequestResolver 
         return SignInProvider.from(request.getParameter(SignInProvider.PARAMETER), googleEnabled).map(chosen::get).orElse(standard);
     }
 
-    @Override public OAuth2AuthorizationRequest resolve(HttpServletRequest request) { return pick(request).resolve(request); }
+    @Override public OAuth2AuthorizationRequest resolve(HttpServletRequest request) { return started(request, pick(request).resolve(request)); }
 
     @Override public OAuth2AuthorizationRequest resolve(HttpServletRequest request, String clientRegistrationId) {
-        return pick(request).resolve(request, clientRegistrationId);
+        return started(request, pick(request).resolve(request, clientRegistrationId));
+    }
+
+    /** DLV-969: one line when the browser is sent to the provider; null (not the authorization path) logs nothing. */
+    private OAuth2AuthorizationRequest started(HttpServletRequest request, OAuth2AuthorizationRequest authorization) {
+        if (authorization != null) {
+            String provider = cloud ? SignInProvider.from(request.getParameter(SignInProvider.PARAMETER), googleEnabled).map(p -> p.parameter).orElse("default") : "identity";
+            OpsLog.success("sign-in.oauth-started").addKeyValue("provider", provider)
+                    .log("OAuth sign-in started: browser sent to the {} sign-in page", provider);
+        }
+        return authorization;
     }
 }

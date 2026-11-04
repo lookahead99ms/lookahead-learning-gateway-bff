@@ -63,9 +63,12 @@ public class GatewayClientConfiguration {
     @Bean RestClient gatewayHttp(OAuthProperties properties, org.springframework.core.env.Environment environment,
             org.springframework.beans.factory.ObjectProvider<org.springframework.boot.ssl.SslBundles> bundles) {
         var publicRequests = boundedRequests(properties);
-        // DLV-969: the request ID goes to our own upstreams so their log lines match this request's.
+        // DLV-969: the request ID goes to our own upstreams so their log lines match this request's, and every call
+        // writes one lookahead.upstream line (service, method, path, status, time; never headers, bodies or the query).
+        var services = OpsLog.services(environment);
         if (!environment.acceptsProfiles(org.springframework.core.env.Profiles.of("lower-cost-dev")))
-            return RestClient.builder().requestFactory(publicRequests).requestInterceptor(RequestLog.forwardTo(uri -> true)).build();
+            return RestClient.builder().requestFactory(publicRequests).requestInterceptor(RequestLog.forwardTo(uri -> true))
+                    .requestInterceptor(OpsLog.upstream(services)).build();
         var client = java.net.http.HttpClient.newBuilder().connectTimeout(properties.connectTimeout())
                 .sslContext(bundles.getObject().getBundle("internal").createSslContext())
                 .followRedirects(java.net.http.HttpClient.Redirect.NEVER).build();
@@ -79,7 +82,7 @@ public class GatewayClientConfiguration {
             if (internal && (!"https".equals(uri.getScheme()) || uri.getPort() != 8443))
                 throw new IllegalArgumentException("Exact internal HTTPS origin required");
             return (internal ? internalRequests : publicRequests).createRequest(uri, method);
-        }).requestInterceptor(RequestLog.forwardTo(origins::internal)).build();
+        }).requestInterceptor(RequestLog.forwardTo(origins::internal)).requestInterceptor(OpsLog.upstream(services)).build();
     }
     private static RestClient tokenHttp(OAuthProperties properties) {
         return RestClient.builder().requestFactory(boundedRequests(properties)).configureMessageConverters(converters->{
