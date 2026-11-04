@@ -45,7 +45,13 @@ public class GatewayController {
                 var client=clients.<OAuth2AuthorizedClient>loadAuthorizedClient("lookahead",authentication,request);
                 if(client!=null) {
                     int status=http.get().uri(settings.domainApiUpstream()+"/api/v1/auth/me").headers(h->{h.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,h);}).exchange((sent,received)->received.getStatusCode().value());
-                    if(status==200){request.getSession().removeAttribute(CloudGatewaySessions.CHALLENGE);response.sendRedirect(settings.frontend()+GatewayConfiguration.safeReturn(returnTo));return;}
+                    if(status==200){
+                        var session=request.getSession();session.removeAttribute(CloudGatewaySessions.CHALLENGE);
+                        // DLV-969 S36: a resolved challenge whose replace answer said mergeAvailable goes to the merge offer, once.
+                        boolean merge=Boolean.TRUE.equals(session.getAttribute(GatewaySecurityHandlers.MERGE_AFTER_CHALLENGE));session.removeAttribute(GatewaySecurityHandlers.MERGE_AFTER_CHALLENGE);
+                        String target=GatewayConfiguration.safeReturn(returnTo);
+                        response.sendRedirect(settings.frontend()+(merge?GatewaySecurityHandlers.mergeOffer(target):target));return;
+                    }
                 }
             }
         }

@@ -45,7 +45,7 @@ class CloudGatewaySecurityIntegrationTest {
     @Configuration @EnableAutoConfiguration
     @Import({GatewayConfiguration.class,GatewayClientConfiguration.class,OAuthPropertiesConfiguration.class,
         GatewayController.class,CloudAccountController.class,PasswordSignInController.class,IdentityProxyController.class,
-        AccountProxyController.class,GatewayErrorHandler.class,ControlledHttp.class})
+        AccountProxyController.class,AccountMergeProxyController.class,GatewayErrorHandler.class,ControlledHttp.class})
     static class Application {}
     @Configuration static class ControlledHttp {
         MockRestServiceServer server;
@@ -293,6 +293,212 @@ class CloudGatewaySecurityIntegrationTest {
         upstream("admit","{\"data\":{\"challengeToken\":\""+"c".repeat(43)+"\"}}");handlers.loginSucceeded(request,response,auth);
         assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in/choose?returnTo=%2Fstudy-plan%3Fview%3Dweek");
         assertThat(response.getContentAsString()).doesNotContain("synthetic-access","c".repeat(43));fixture.server.verify();
+    }
+    /** DLV-969 S36: a redirect sign-in admitted with a literal mergeAvailable true goes to the merge offer instead of its target. */
+    @Test void admittedSignInWithMergeAvailableGoesToTheMergeOffer()throws Exception {
+        String token="abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Z";
+        record Case(String admit,String returnTo,String expected){}
+        for(var c:java.util.List.of(
+                new Case("{\"data\":{\"signInId\":\"s1\",\"mergeAvailable\":true}}","/learn","/account/merge?offer=1"),
+                new Case("{\"data\":{\"signInId\":\"s1\",\"mergeAvailable\":false}}","/learn","/learn"),
+                new Case("{\"data\":{\"signInId\":\"s1\"}}","/learn","/learn"),
+                // Only a JSON boolean counts; a string or number is ignored.
+                new Case("{\"data\":{\"signInId\":\"s1\",\"mergeAvailable\":\"true\"}}","/learn","/learn"),
+                new Case("{\"data\":{\"signInId\":\"s1\",\"mergeAvailable\":1}}","/learn","/learn"),
+                // Already heading to the merge page from the email link: the token stays.
+                new Case("{\"data\":{\"signInId\":\"s1\",\"mergeAvailable\":true}}","/account/merge?token="+token,"/account/merge?token="+token),
+                new Case("{\"data\":{\"signInId\":\"s1\"}}","/account/merge?token="+token,"/account/merge?token="+token),
+                // A bare merge target gets the offer; an existing offer stays as it is.
+                new Case("{\"data\":{\"signInId\":\"s1\",\"mergeAvailable\":true}}","/account/merge","/account/merge?offer=1"),
+                new Case("{\"data\":{\"signInId\":\"s1\",\"mergeAvailable\":true}}","/account/merge?offer=1","/account/merge?offer=1"),
+                new Case("{\"data\":{\"signInId\":\"s1\"}}","/account/merge","/account/merge"))) {
+            fixture.server.reset();
+            var session=session(false);session.setAttribute("learningReturnTo",c.returnTo());
+            var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+            var auth=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+            upstream("admit",c.admit());
+            var events=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event");
+            var logged=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();logged.start();events.addAppender(logged);
+            try { handlers.loginSucceeded(request,response,auth); } finally { events.detachAppender(logged); }
+            assertThat(response.getRedirectedUrl()).as(c.admit()+" "+c.returnTo()).isEqualTo(settings.frontend()+c.expected());
+            assertThat(session.isInvalid()).isFalse();fixture.server.verify();
+            // DLV-969 log: the completion line says whether the merge was offered; the offer redirect is one more INFO line, only for a literal true.
+            boolean offered=c.admit().contains("\"mergeAvailable\":true");
+            var completed=logged.list.stream().filter(l->OpsLogTest.pairs(l).contains("event.action=sign-in.completed")).findFirst().orElseThrow();
+            assertThat(OpsLogTest.pairs(completed)).as(c.admit()).contains("merge.available="+offered);
+            assertThat(completed.getFormattedMessage()).as(c.admit()).startsWith("Sign-in completed (").contains("): Domain admitted the account");
+            assertThat(completed.getFormattedMessage().endsWith(" and other accounts share its verified email (merge offered)")).as(c.admit()).isEqualTo(offered);
+            var offers=logged.list.stream().filter(l->OpsLogTest.pairs(l).contains("event.action=sign-in.merge-offer")).toList();
+            assertThat(offers).as(c.admit()).hasSize(offered?1:0);
+            if(offered)assertThat(offers.getFirst().getFormattedMessage()).isEqualTo("Sign-in completed and other accounts share this person's verified email: redirected to the merge offer page");
+            assertThat(logged.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).noneMatch(m->m.contains(token));
+        }
+    }
+    /** DLV-969 S36: without a gate (PROD) a waiting account lands on the landing notice, never on the merge offer. */
+    @Test void prodWaitingAccountNeverGoesToTheMergeOffer()throws Exception {
+        var session=session(false);session.setAttribute("learningReturnTo","/learn");
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        var auth=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"ACCOUNT_ADMISSION_REQUIRED\",\"data\":{\"mergeAvailable\":true}}"));
+        handlers.loginSucceeded(request,response,auth);
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/?access=pending");
+        assertThat(GatewaySecurityHandlers.mergeAvailable(request)).isFalse();fixture.server.verify();
+    }
+    /** DLV-969 S36: a sign-in still at the challenge goes to /sign-in/choose and carries no offer, even when Domain says mergeAvailable. */
+    @Test void signInAtTheChallengeCarriesNoMergeOffer()throws Exception {
+        var session=session(false);session.setAttribute("learningReturnTo","/learn");session.setAttribute(GatewaySecurityHandlers.MERGE_AFTER_CHALLENGE,Boolean.TRUE);
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        var auth=((org.springframework.security.core.context.SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+        upstream("admit","{\"data\":{\"challengeToken\":\""+"c".repeat(43)+"\",\"mergeAvailable\":true}}");
+        handlers.loginSucceeded(request,response,auth);
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/sign-in/choose?returnTo=%2Flearn");
+        assertThat(GatewaySecurityHandlers.mergeAvailable(request)).isFalse();
+        // A leftover offer from an earlier challenge never carries over to this one.
+        assertThat(request.getSession().getAttribute(GatewaySecurityHandlers.MERGE_AFTER_CHALLENGE)).isNull();fixture.server.verify();
+    }
+    /** DLV-969 S36: the replace answer's literal mergeAvailable true is relayed, and the /bff/login that completes the challenge sends the offer once. */
+    @Test void resolvedChallengeWithMergeAvailableGoesToTheMergeOffer()throws Exception {
+        String token="abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Z";
+        record Case(String replace,boolean relayed,String returnTo,String expected){}
+        for(var c:java.util.List.of(
+                new Case("{\"data\":{\"accountId\":\"owner\",\"mergeAvailable\":true}}",true,"/learn/modern-java","/account/merge?offer=1"),
+                new Case("{\"data\":{\"accountId\":\"owner\",\"mergeAvailable\":true}}",true,"/account/merge","/account/merge?offer=1"),
+                new Case("{\"data\":{\"accountId\":\"owner\",\"mergeAvailable\":true}}",true,"/account/merge?token="+token,"/account/merge?token="+token),
+                new Case("{\"data\":{\"accountId\":\"owner\",\"mergeAvailable\":false}}",false,"/learn/modern-java","/learn/modern-java"),
+                new Case("{\"data\":{\"accountId\":\"owner\",\"mergeAvailable\":\"true\"}}",false,"/learn/modern-java","/learn/modern-java"),
+                new Case("{\"data\":{\"accountId\":\"owner\"}}",false,"/learn/modern-java","/learn/modern-java"))) {
+            fixture.server.reset();
+            var session=session(true);String csrf=csrf(session);
+            upstream("replace",c.replace());
+            fixture.server.expect(requestTo(settings.domainApiUpstream()+"/api/v1/auth/me")).andRespond(withSuccess("{}",MediaType.APPLICATION_JSON));
+            var answer=mvc.perform(post("/api/v1/auth/sign-in-challenge/replace").session(session).header("X-CSRF-TOKEN",csrf).contentType(MediaType.APPLICATION_JSON).content("{\"signInId\":\"selected\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.accountId").value("owner"));
+            if(c.relayed())answer.andExpect(jsonPath("$.data.mergeAvailable").value(true));else answer.andExpect(jsonPath("$.data.mergeAvailable").doesNotExist());
+            mvc.perform(get("/bff/login").session(session).param("returnTo",c.returnTo())).andExpect(redirectedUrl(settings.frontend()+c.expected()));
+            assertThat(session.getAttribute(CloudGatewaySessions.CHALLENGE)).isNull();
+            assertThat(session.getAttribute(GatewaySecurityHandlers.MERGE_AFTER_CHALLENGE)).as(c.replace()).isNull();fixture.server.verify();
+            // Used once: a later page-load sign-in reuse goes to its normal target.
+            fixture.server.reset();
+            fixture.server.expect(requestTo(settings.domainApiUpstream()+"/api/v1/auth/me")).andRespond(withSuccess("{}",MediaType.APPLICATION_JSON));
+            mvc.perform(get("/bff/login").session(session).param("returnTo","/learn")).andExpect(redirectedUrl(settings.frontend()+"/learn"));fixture.server.verify();
+        }
+    }
+    /** DLV-969 S36: a waiting account always lands on /welcome, never on the merge offer, whatever Domain's body says. */
+    @Test void waitingAccountNeverGoesToTheMergeOffer()throws Exception {
+        var now=Instant.now();var auth=oidcSignIn(now,now.minusSeconds(3));
+        var session=new MockHttpSession(context.getServletContext());session.setAttribute("learningReturnTo","/learn");
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        clients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),auth.getName(),
+            new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,"synthetic-access",now,now.plusSeconds(300))),auth,request,response);
+        var gated=new GatewaySecurityHandlers(settings,clients,http,java.util.Optional.of(DevGate.freshSignIn(java.time.Clock.systemUTC())));
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"ACCOUNT_ADMISSION_REQUIRED\",\"data\":{\"mergeAvailable\":true}}"));
+        gated.loginSucceeded(request,response,auth);
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/welcome?access=pending");
+        assertThat(GatewaySecurityHandlers.mergeAvailable(request)).isFalse();fixture.server.verify();
+    }
+    /** DLV-969 S36: the Web's same-origin merge routes reach Domain's account routes with the server-held token and proof. */
+    org.springframework.test.web.client.ResponseActions mergeUpstream(String path,org.springframework.http.HttpMethod method){
+        return fixture.server.expect(requestTo(settings.domainApiUpstream()+path))
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(method))
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("Authorization","Bearer synthetic-access"))
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("X-LookAhead-SignIn-Proof",org.hamcrest.Matchers.matchesPattern("[A-Za-z0-9_-]{43}")))
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist("X-LookAhead-Gateway-Secret"))
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist("Cookie"));
+    }
+    @Test void mergeRoutesAreForwardedToDomainWithStatusAndBodyUnchanged()throws Exception {
+        String token="abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Z", keep="{\"keepAccountId\":\"2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a\"}";
+        var session=session(false);String csrf=csrf(session);
+        mergeUpstream("/api/v1/account/merge/request",org.springframework.http.HttpMethod.POST)
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.content().string("{}"))
+            .andRespond(withStatus(org.springframework.http.HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON).body("{\"data\":{}}"));
+        mergeUpstream("/api/v1/account/merge/"+token,org.springframework.http.HttpMethod.GET)
+            .andRespond(withSuccess("{\"data\":{\"email\":\"p@example.test\",\"candidates\":[]}}",MediaType.APPLICATION_JSON));
+        mergeUpstream("/api/v1/account/merge/"+token,org.springframework.http.HttpMethod.POST)
+            .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.content().string(keep))
+            .andRespond(withSuccess("{\"data\":{\"keptAccountId\":\"2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a\"}}",MediaType.APPLICATION_JSON));
+        var events=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var logged=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();logged.start();events.addAppender(logged);
+        try {
+            mvc.perform(post("/api/v1/account/merge/request").session(session).header("X-CSRF-TOKEN",csrf).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isAccepted()).andExpect(content().json("{\"data\":{}}")).andExpect(header().string("Cache-Control","no-store"));
+            mvc.perform(get("/api/v1/account/merge/"+token).session(session)).andExpect(status().isOk()).andExpect(jsonPath("$.data.email").value("p@example.test"));
+            mvc.perform(post("/api/v1/account/merge/"+token).session(session).header("X-CSRF-TOKEN",csrf).contentType(MediaType.APPLICATION_JSON).content(keep))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.keptAccountId").value("2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a"));
+            fixture.server.verify();
+            // DLV-969 log: one INFO line per merge step, like the other account actions; never the token, email or account id.
+            assertThat(logged.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).containsExactly(
+                "Merge step merge.request accepted by Domain: if there is anything to merge, the link is on its way by email",
+                "Merge step merge.candidates done: Domain listed the accounts behind the emailed link",
+                "Merge step merge.merge done: Domain merged the accounts; this sign-in ends");
+            assertThat(OpsLogTest.pairs(logged.list.get(2))).contains("event.action=merge.merge","event.outcome=success","upstream.status=200");
+            assertThat(logged.list).allMatch(line->line.getLevel()==ch.qos.logback.classic.Level.INFO);
+            logged.list.clear();
+            // Domain's refusals come back as Domain sent them, not as the Gateway's own answer; each is one WARN line with Domain's code.
+            for(int status:new int[]{400,404,409,422}) {
+                fixture.server.reset();
+                String body="{\"status\":"+status+",\"code\":\"FROM_DOMAIN_"+status+"\"}";
+                mergeUpstream("/api/v1/account/merge/"+token,org.springframework.http.HttpMethod.POST).andRespond(withStatus(org.springframework.http.HttpStatus.valueOf(status)).contentType(MediaType.APPLICATION_JSON).body(body));
+                mvc.perform(post("/api/v1/account/merge/"+token).session(session).header("X-CSRF-TOKEN",csrf).contentType(MediaType.APPLICATION_JSON).content(keep))
+                    .andExpect(status().is(status)).andExpect(content().json(body));
+                fixture.server.verify();
+                var line=logged.list.getLast();
+                assertThat(line.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+                assertThat(line.getFormattedMessage()).isEqualTo("Merge step merge.merge refused by Domain: FROM_DOMAIN_"+status+" (HTTP "+status+")");
+                assertThat(OpsLogTest.pairs(line)).contains("event.action=merge.merge","event.outcome=refused","reason=FROM_DOMAIN_"+status,"upstream.status="+status);
+            }
+            assertThat(logged.list).hasSize(4);logged.list.clear();
+            fixture.server.reset();
+            mergeUpstream("/api/v1/account/merge/"+token,org.springframework.http.HttpMethod.GET)
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON).body("{\"status\":404,\"code\":\"MERGE_TOKEN_INVALID\",\"message\":\"from Domain\"}"));
+            mvc.perform(get("/api/v1/account/merge/"+token).session(session)).andExpect(status().isNotFound()).andExpect(jsonPath("$.message").value("from Domain"));
+            fixture.server.verify();
+            assertThat(logged.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).containsExactly("Merge step merge.candidates refused by Domain: MERGE_TOKEN_INVALID (HTTP 404)");
+            logged.list.clear();
+            // Domain unreachable: the Gateway's own 503, never a stack trace; the line names the exception types only.
+            fixture.server.reset();
+            mergeUpstream("/api/v1/account/merge/request",org.springframework.http.HttpMethod.POST).andRespond(sent->{throw new java.io.IOException("synthetic outage");});
+            mvc.perform(post("/api/v1/account/merge/request").session(session).header("X-CSRF-TOKEN",csrf).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("SERVICE_UNAVAILABLE"));
+            fixture.server.verify();
+            var outage=logged.list.getLast();
+            assertThat(outage.getFormattedMessage()).startsWith("Merge step merge.request refused: SERVICE_UNAVAILABLE (Domain did not answer (").doesNotContain("synthetic outage");
+            assertThat(OpsLogTest.pairs(outage)).contains("event.action=merge.request","event.outcome=failure","reason=SERVICE_UNAVAILABLE","http.status=503");
+            assertThat(logged.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).noneMatch(m->m.contains(token)||m.contains("p@example.test")||m.contains("2c7e9a4d"));
+        } finally { events.detachAppender(logged); }
+    }
+    @Test void mergeRoutesRefuseBeforeDomainWithoutSignInCsrfOrAWellFormedToken()throws Exception {
+        String token="abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Z";
+        // Signed out: 401 from the security chain.
+        mvc.perform(get("/api/v1/account/merge/"+token)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+        var anonymous=new MockHttpSession(context.getServletContext());String anonymousCsrf=csrf(anonymous);
+        mvc.perform(post("/api/v1/account/merge/request").session(anonymous).header("X-CSRF-TOKEN",anonymousCsrf).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized());
+        // Signed in, but a POST without this session's CSRF token is rejected.
+        var session=session(false);String other=csrf(session(false));
+        for(String path:new String[]{"/api/v1/account/merge/request","/api/v1/account/merge/"+token}) {
+            mvc.perform(post(path).session(session).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+            mvc.perform(post(path).session(session).header("X-CSRF-TOKEN",other).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+        }
+        // A token that is not 43 url-safe characters never reaches Domain.
+        String csrf=csrf(session);
+        for(String bad:new String[]{"short",token+"x","request"}) {
+            mvc.perform(get("/api/v1/account/merge/"+bad).session(session)).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MERGE_TOKEN_INVALID"));
+        }
+        mvc.perform(post("/api/v1/account/merge/"+token.substring(1)+".").session(session).header("X-CSRF-TOKEN",csrf).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isNotFound());
+        // A session at the sign-in challenge has no account routes yet; the refusal is one WARN line with its code.
+        var restricted=session(true);String restrictedCsrf=csrf(restricted);
+        var events=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var logged=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();logged.start();events.addAppender(logged);
+        try {
+            mvc.perform(post("/api/v1/account/merge/request").session(restricted).header("X-CSRF-TOKEN",restrictedCsrf).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("SIGN_IN_CHALLENGE_REQUIRED"));
+            var line=logged.list.stream().filter(l->OpsLogTest.pairs(l).contains("event.action=merge.request")).findFirst().orElseThrow();
+            assertThat(line.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(line.getFormattedMessage()).isEqualTo("Merge step merge.request refused: SIGN_IN_CHALLENGE_REQUIRED (the person must first choose which active sign-in to end)");
+            assertThat(OpsLogTest.pairs(line)).contains("event.outcome=refused","reason=SIGN_IN_CHALLENGE_REQUIRED","http.status=401");
+        } finally { events.detachAppender(logged); }
+        fixture.server.verify();
     }
     @Test void domainFailurePreservesSessionInsteadOfClaimingLogout()throws Exception {
         var session=session(false);String token=csrf(session);

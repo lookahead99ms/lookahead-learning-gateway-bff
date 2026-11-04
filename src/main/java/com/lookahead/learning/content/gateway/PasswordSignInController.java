@@ -195,7 +195,13 @@ public class PasswordSignInController {
 
     private ResponseEntity<?> next(HttpServletRequest request, HttpServletResponse response, String username, String returnTo,
             ChallengeNameType challenge, String session, AuthenticationResultType tokens) {
-        if (tokens != null) return step("SIGNED_IN", null, finish(request, response, username, returnTo, tokens));
+        if (tokens != null) {
+            String next = finish(request, response, username, returnTo, tokens);
+            // DLV-969 S36: the page shows "Check your inbox" itself, so the next path stays the normal one. Only a final
+            // destination carries it; a further sign-in step (/sign-in/choose, an error or waiting page) never does.
+            boolean merge = GatewaySecurityHandlers.mergeAvailable(request) && GatewayConfiguration.safeReturn(next).equals(next);
+            return step("SIGNED_IN", null, next, merge);
+        }
         if (challenge == null || session == null || session.isBlank()) return failure(503, "SERVICE_UNAVAILABLE");
         String kind = switch (challenge) {
             case NEW_PASSWORD_REQUIRED -> "NEW_PASSWORD";
@@ -309,13 +315,14 @@ public class PasswordSignInController {
         return failure(503, "SERVICE_UNAVAILABLE");
     }
 
-    static ResponseEntity<?> step(String kind, String destination) { return step(kind, destination, null); }
+    static ResponseEntity<?> step(String kind, String destination) { return step(kind, destination, null, false); }
 
-    static ResponseEntity<?> step(String kind, String destination, String next) {
+    static ResponseEntity<?> step(String kind, String destination, String next, boolean mergeAvailable) {
         var data = new java.util.LinkedHashMap<String, Object>();
         data.put("step", kind);
         if (destination != null) data.put("destination", destination);
         if (next != null) data.put("next", next);
+        if (mergeAvailable) data.put("mergeAvailable", true);
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(ApiResponse.success(data));
     }
 

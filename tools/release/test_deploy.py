@@ -1,5 +1,6 @@
 """Tests for the per-application DEV deploy tool (one ECS service per application, ECS rolling updates); AWS and GitHub are
 injected fakes, nothing is called for real."""
+from datetime import timedelta
 import json
 from pathlib import Path
 import shutil
@@ -335,6 +336,11 @@ class ApprovalTests(DeployFixture):
         self.assertIn('AWS::ECS::Service', issue['body'])
         self.assertNotIn('slot', issue['body'].lower())
         m.verify(planned, receipt, self.env, self.root, self.get, self.now)
+        # Valid for 15 minutes from the approving comment, past the 10-minute wait: accepted at 14:59, refused at 15:00.
+        self.assertEqual(self.now.isoformat(), receipt['approvedAt'])
+        m.verify(planned, receipt, self.env, self.root, self.get, self.now + timedelta(minutes=14, seconds=59))
+        with self.assertRaisesRegex(ValueError, 'no longer valid'):
+            m.verify(planned, receipt, self.env, self.root, self.get, self.now + timedelta(minutes=15))
 
     def test_parking_issue_says_nothing_is_deleted(self):
         self.aws.serving('b')
@@ -366,9 +372,27 @@ class ApprovalTests(DeployFixture):
 
     def test_approve_times_out_without_an_owner_comment(self):
         planned = self.planned()
+        # The owner has 10 minutes to answer a deploy (5 for a duplicate image); the wait polls every 20 seconds for exactly that window.
+        self.assertEqual((timedelta(minutes=10), timedelta(minutes=5)), (m.approvalWindow(planned), m.approvalWindow({**planned, 'unchanged': True})))
+        self.assertIn('Answer within 10 minutes of this issue being created; the approval is then acted on within 15 minutes of the approving comment', m.gist(planned))
+        # Repository variables shorten the wait and lengthen the validity; the duplicate-image wait stays five minutes; the issue states the effective numbers.
+        short = {**self.env, 'APPROVAL_WAIT_MINUTES': '3', 'APPROVAL_VALID_MINUTES': '30'}
+        self.assertEqual((timedelta(minutes=3), timedelta(minutes=5)), (m.approvalWindow(planned, short), m.approvalWindow({**planned, 'unchanged': True}, short)))
+        receipt = m.approve(planned, short, self.root, self.get, now=self.clock, sleep=lambda s: None)
+        self.assertEqual(((self.now + timedelta(minutes=3)).isoformat(), 30), (receipt['expiresAt'], receipt['validMinutes']))
+        self.assertIn('Answer within 3 minutes of this issue being created; the approval is then acted on within 30 minutes of the approving comment', self.github.data['issues/3']['body'])
+        m.verify(planned, receipt, short, self.root, self.get, self.now + timedelta(minutes=29, seconds=59))
+        with self.assertRaisesRegex(ValueError, 'no longer valid'):
+            m.verify(planned, receipt, short, self.root, self.get, self.now + timedelta(minutes=30))
         self.github.comment = lambda: {'id': 7, 'user': {'login': 'someone'}, 'body': 'APPROVE DEPLOY ' + planned['imageTag'], 'created_at': '2026-01-01T00:00:00+00:00', 'updated_at': '2026-01-01T00:00:00+00:00'}
+        sleeps = []
         with self.assertRaises(TimeoutError):
-            self.approved(planned)
+            m.approve(planned, short, self.root, self.get, now=self.clock, sleep=sleeps.append)
+        self.assertEqual([20] * 9, sleeps)
+        sleeps = []
+        with self.assertRaises(TimeoutError):
+            m.approve(planned, self.env, self.root, self.get, now=self.clock, sleep=sleeps.append)
+        self.assertEqual([20] * 30, sleeps)
 
 
 class ExecuteTests(DeployFixture):

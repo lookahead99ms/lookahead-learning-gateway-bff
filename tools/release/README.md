@@ -41,7 +41,8 @@ Actions minutes. Manual `01`, `02`, `03` and `04` are unaffected. Delete the var
 4. **Approve ECR publish** (`approve`): no credentials, no environment. `owner_release.py gate`
    re-resolves the tag from the frozen record and `owner_release.py approve` opens the owner issue
    bound to the exact image: `APPROVE IMAGE <version>` (the ECR image tag, for example
-   `web-v2026.10.28.15.01`) within 40 minutes, `REJECT` stops; edited comments, a moved tag or main,
+   `web-v2026.10.28.15.01`) within 10 minutes of the issue, `REJECT` stops; the approval is then valid for
+   15 minutes from the approving comment (the recheck before credentials enforces it); edited comments, a moved tag or main,
    or a changed issue fail closed.
 5. **Publish to ECR** (`publish`, environment `dev`, no required reviewers): rechecks the live
    approval and the tag before OIDC, imports the scanned image without rebuilding, assumes the
@@ -77,7 +78,8 @@ scheduled scale-down from 2026-11-05). `01 · Full` always passes `1`.
    `refresh` and `verify` instead of `deploy` (`verify` only when the duplicate is a parked service).
 3. **Approve DEV deploy** (`approve-deploy`): no credentials; `deploy.py approve` opens the owner
    issue bound to that plan: `APPROVE DEPLOY <image tag>` (for example `web-v2026.11.01.14.00`)
-   within 40 minutes, `REJECT` stops; the plan digest is in the issue body and the receipt. For a
+   within 10 minutes of the issue, `REJECT` stops; the approval is then valid for 15 minutes from the approving
+   comment (rechecked before credentials); the plan digest is in the issue body and the receipt. For a
    **duplicate image** the issue title and first line carry a warning, the window is **5 minutes**, and
    the answers are `APPROVE REFRESH <image tag>` (restart on the same image: the change set sets the
    template parameter `RefreshToken` to `run-<run id>`, CloudFormation registers a new task definition
@@ -152,7 +154,8 @@ concurrency group, so it never runs beside a deploy. Use `04 · Deploy DEV` for 
    the target itself). With neither, the plan stops and asks for the input. The fallback tag is frozen the same way;
    then `recover.py plan` writes one `deploy.py` plan per stage (artifact `recover-plan`).
 3. **Approve DEV recovery**: one issue lists every stage, both releases and the park steps; the owner answers
-   `APPROVE RECOVER <app>-<tag>` within 40 minutes (`REJECT` stops the run).
+   `APPROVE RECOVER <app>-<tag>` within 10 minutes of the issue (`REJECT` stops the run); the approval is then valid for
+   15 minutes from the approving comment (rechecked before credentials).
 4. **Recover DEV** (environment `dev`): the live approval is rechecked before any credentials; then each stage assumes
    its own deploy session `<app>-deploy-<run>-<n>` (60 minutes each) and runs `recover.py stage`:
    - `park` (session 1): DesiredCount 0 for the target release. On a stack in `UPDATE_IN_PROGRESS` /
@@ -175,6 +178,14 @@ plan's digest and template, the change-set preview, and the session identity. St
 without it a busy stack stops the run at its first stage, and an idle stack recovers without it.
 
 ## Settings the repository needs
+
+Two optional repository variables set the owner windows without a code change; both default in code when unset or
+empty. `APPROVAL_WAIT_MINUTES` (default 10, allowed 2..15 so the 20-minute approve job always fits) is how long an
+approval issue waits for the owner's comment; `APPROVAL_VALID_MINUTES` (default 15, allowed 5..60) is how long an
+approval stays valid from the approving comment for the job that rechecks and acts on it, and also bounds the
+keep-or-rollback decision. The approve and acting jobs of `01 · Full`, `04 · Deploy DEV` and `05 · Recover DEV` pass
+them through; the issue states the effective numbers and the receipt records them. A non-integer or out-of-range
+value stops the run naming the variable; the duplicate-image wait stays 5 minutes.
 
 Environment `dev` allowing exactly the `main` branch and **without** required reviewers (the owner
 issue is the approval; a reviewer rule would add GitHub's deployment pop-up on top of it).

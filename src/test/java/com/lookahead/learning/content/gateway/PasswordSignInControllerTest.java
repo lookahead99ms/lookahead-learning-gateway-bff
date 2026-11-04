@@ -144,6 +144,58 @@ class PasswordSignInControllerTest {
         assertThat(response.getBody().toString()).doesNotContain("synthetic-access", "synthetic-refresh", "synthetic-id", PASSWORD);
     }
 
+    /** DLV-969 S36: SIGNED_IN carries mergeAvailable only when the shared completion saw Domain's literal true; next stays normal. */
+    @Test void signedInCarriesMergeAvailableOnlyWhenDomainSaidTrue() {
+        answer = m -> InitiateAuthResponse.builder().authenticationResult(tokens()).build();
+        when(handlers.completeSignIn(any(), any(), any())).thenAnswer(call -> {
+            ((jakarta.servlet.http.HttpServletRequest) call.getArgument(0)).setAttribute(GatewaySecurityHandlers.MERGE_AVAILABLE, Boolean.TRUE);
+            return "/learn";
+        });
+        var merge = controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\",\"returnTo\":\"/learn\"}"), new MockHttpServletResponse());
+        assertThat(data(merge)).isEqualTo(Map.of("step", "SIGNED_IN", "next", "/learn", "mergeAvailable", true));
+        // No attribute (Domain sent false, nothing, or a non-boolean): the field is absent.
+        doReturn("/learn").when(handlers).completeSignIn(any(), any(), any());
+        var plain = controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\",\"returnTo\":\"/learn\"}"), new MockHttpServletResponse());
+        assertThat(data(plain)).isEqualTo(Map.of("step", "SIGNED_IN", "next", "/learn"));
+        // Only Boolean.TRUE counts as the marker.
+        doAnswer(call -> {
+            ((jakarta.servlet.http.HttpServletRequest) call.getArgument(0)).setAttribute(GatewaySecurityHandlers.MERGE_AVAILABLE, "true");
+            return "/learn";
+        }).when(handlers).completeSignIn(any(), any(), any());
+        var text = controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\",\"returnTo\":\"/learn\"}"), new MockHttpServletResponse());
+        assertThat(data(text)).isEqualTo(Map.of("step", "SIGNED_IN", "next", "/learn"));
+    }
+
+    /** DLV-969 S36: the flag rides only on a final destination; the challenge and reset routes' final SIGNED_IN carry it too. */
+    @Test void mergeAvailableOnlyRidesOnAFinalDestination() {
+        String[] next = {"/learn"};
+        doAnswer(call -> {
+            ((jakarta.servlet.http.HttpServletRequest) call.getArgument(0)).setAttribute(GatewaySecurityHandlers.MERGE_AVAILABLE, Boolean.TRUE);
+            return next[0];
+        }).when(handlers).completeSignIn(any(), any(), any());
+        // A further sign-in step or a refusal page is never a final destination.
+        for (String step : new String[] {"/sign-in/choose?returnTo=%2Flearn", "/sign-in?error=admission", "/welcome?access=pending", "/dev/access?error=signin"}) {
+            next[0] = step;
+            answer = m -> InitiateAuthResponse.builder().authenticationResult(tokens()).build();
+            var response = controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse());
+            assertThat(data(response)).as(step).isEqualTo(Map.of("step", "SIGNED_IN", "next", step));
+        }
+        next[0] = "/learn";
+        // The email-code challenge, once answered, is the final sign-in.
+        answer = m -> m.equals("initiateAuth")
+            ? InitiateAuthResponse.builder().challengeName(ChallengeNameType.EMAIL_OTP).session("s").build()
+            : RespondToAuthChallengeResponse.builder().authenticationResult(tokens()).build();
+        var first = post("{\"email\":\"arjun@example.invalid\",\"password\":\"" + PASSWORD + "\"}");
+        assertThat(data(controller.signIn(first, new MockHttpServletResponse()))).isEqualTo(Map.of("step", "EMAIL_CODE"));
+        var code = post("{\"code\":\"123456\"}"); code.setSession(first.getSession());
+        assertThat(data(controller.challenge(code, new MockHttpServletResponse()))).isEqualTo(Map.of("step", "SIGNED_IN", "next", "/learn", "mergeAvailable", true));
+        // So is the sign-in that follows a password reset.
+        answer = m -> m.equals("confirmForgotPassword") ? ConfirmForgotPasswordResponse.builder().build()
+            : InitiateAuthResponse.builder().authenticationResult(tokens()).build();
+        var reset = controller.reset(post("{\"email\":\"meera@example.invalid\",\"code\":\"123456\",\"newPassword\":\"" + PASSWORD + "\",\"returnTo\":\"/learn\"}"), new MockHttpServletResponse());
+        assertThat(data(reset)).isEqualTo(Map.of("step", "SIGNED_IN", "next", "/learn", "mergeAvailable", true));
+    }
+
     @Test void unsafeReturnFallsBackHomeAndMissingExpiryDefaultsToFiveMinutes() {
         answer = m -> InitiateAuthResponse.builder().authenticationResult(tokens().toBuilder().expiresIn(null).refreshToken(null).build()).build();
         when(handlers.completeSignIn(any(), any(), any())).thenReturn("/");

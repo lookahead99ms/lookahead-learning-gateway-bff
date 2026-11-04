@@ -172,9 +172,12 @@ class StageContractTests(unittest.TestCase):
         self.assertEqual(['release', 'build'], approve['needs'])
         self.assertEqual("always() && needs.build.result == 'success' && (" + A + " == 'full' || " + A + " == 'publish')", approve['if'])
         self.assertEqual({'contents': 'read', 'actions': 'read', 'issues': 'write', 'pull-requests': 'read'}, approve['permissions'])
+        # A hung poll bills at most 20 runner minutes: the 10-minute owner window plus checkout and setup.
+        self.assertEqual(20, approve['timeout-minutes'])
         self.assertNotIn('environment', approve)
         self.assertEqual([], uses(approve, 'aws-actions/'))
-        self.assertEqual({'RELEASE_VERSION': '${{ needs.release.outputs.release-version }}', 'SOURCE_SHA': '${{ needs.release.outputs.source-sha }}', 'GH_TOKEN': '${{ github.token }}'}, approve['env'])
+        self.assertEqual({'RELEASE_VERSION': '${{ needs.release.outputs.release-version }}', 'SOURCE_SHA': '${{ needs.release.outputs.source-sha }}', 'GH_TOKEN': '${{ github.token }}',
+                          'APPROVAL_WAIT_MINUTES': '${{ vars.APPROVAL_WAIT_MINUTES }}', 'APPROVAL_VALID_MINUTES': '${{ vars.APPROVAL_VALID_MINUTES }}'}, approve['env'])
         downloads = {s['with']['name']: s['with']['path'] for s in uses(approve, 'actions/download-artifact@')}
         self.assertEqual({'release-source': '${{ runner.temp }}', 'release-image-${{ needs.release.outputs.source-sha }}': '${{ runner.temp }}/release-image'}, downloads)
         checkouts = [(s['with']['ref'], s['with'].get('path'), s['with']['persist-credentials']) for s in uses(approve, 'actions/checkout@')]
@@ -270,6 +273,7 @@ class RecoverWorkflowTests(unittest.TestCase):
     def test_one_approval_then_five_stages_each_in_its_own_session(self):
         approve, recover = self.jobs['approve-recovery'], self.jobs['recover-dev']
         self.assertNotIn('environment', approve); self.assertEqual([], uses(approve, 'aws-actions/'))
+        self.assertEqual(20, approve['timeout-minutes'])  # 10-minute owner window plus checkout and setup
         self.assertIn('--match "Recover"', approve['steps'][-1]['run'])
         self.assertEqual((['plan-recovery', 'approve-recovery'], 'dev'), (recover['needs'], recover['environment']))
         order = names(recover)
@@ -347,6 +351,7 @@ class DeployWorkflowTests(unittest.TestCase):
         approve = self.jobs['approve-deploy']
         self.assertEqual((['plan-dev'], "always() && needs.plan-dev.result == 'success'"), (approve['needs'], approve['if']))
         self.assertEqual({'contents': 'read', 'actions': 'read', 'issues': 'write', 'pull-requests': 'read'}, approve['permissions'])
+        self.assertEqual(20, approve['timeout-minutes'])  # 10-minute owner window plus checkout and setup
         self.assertNotIn('environment', approve); self.assertEqual([], uses(approve, 'aws-actions/'))
         self.assertIn('deploy.py approve --plan "$RUNNER_TEMP/deploy-plan/plan.json" --receipt "$RUNNER_TEMP/deploy-approval/approval.json"', '\n'.join(runs(approve)))
         self.assertEqual({'deploy-plan': '${{ runner.temp }}/deploy-plan'}, {s['with']['name']: s['with']['path'] for s in uses(approve, 'actions/download-artifact@')})
@@ -398,6 +403,22 @@ class DeployWorkflowTests(unittest.TestCase):
         self.assertEqual('Retain', template['Resources']['Service']['DeletionPolicy'])
         self.assertEqual({'Task', 'Service'}, set(template['Resources']))
         self.assertNotIn('ActivationAuthorized', json.dumps(template.get('Metadata', {})))
+
+
+class ApprovalWindowVariableTests(unittest.TestCase):
+    def test_every_job_that_waits_for_or_rechecks_an_approval_passes_the_window_variables(self):
+        # Repository variables APPROVAL_WAIT_MINUTES / APPROVAL_VALID_MINUTES reach owner_approval.py only through these jobs; an unset
+        # variable arrives as an empty string and the tooling falls back to its defaults (10 and 15 minutes).
+        wiring = {'APPROVAL_WAIT_MINUTES': '${{ vars.APPROVAL_WAIT_MINUTES }}', 'APPROVAL_VALID_MINUTES': '${{ vars.APPROVAL_VALID_MINUTES }}'}
+        approving = {'release.yml': ('approve', 'publish'), 'deploy-dev.yml': ('approve-deploy', 'deploy-dev'), 'recover-dev.yml': ('approve-recovery', 'recover-dev')}
+        for file, jobs in approving.items():
+            workflow = load(file)
+            for job, spec in workflow['jobs'].items():
+                env = spec.get('env') or {}
+                if job in jobs:
+                    self.assertEqual(wiring, {k: env.get(k) for k in wiring}, file + ' ' + job)
+                else:
+                    self.assertFalse(set(wiring) & set(env), file + ' ' + job)  # only approval jobs read the variables
 
 
 if __name__ == '__main__':
