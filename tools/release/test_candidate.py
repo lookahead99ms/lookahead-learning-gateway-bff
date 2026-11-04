@@ -84,6 +84,13 @@ class CandidateTests(unittest.TestCase):
                 return m.decide('dev', f.env, verification, get, lambda: f.github.now, lambda _: None)
             kept = run([comment(keep)])
             self.assertEqual((kept['decision'], kept['commentId'], kept['stage'], kept['schema']), ('keep', 9, 'dev', m.SCHEMA_DECISION))
+            # The decision window is the approval validity window: 15 minutes by default, APPROVAL_VALID_MINUTES otherwise; the issue states it.
+            self.assertEqual((f.github.now + timedelta(minutes=15)).isoformat(), kept['expiresAt'])
+            self.assertIn('after 15 minutes with no decision', f.github.data['issues/3']['body'])
+            f.env['APPROVAL_VALID_MINUTES'] = '20'
+            self.assertEqual((f.github.now + timedelta(minutes=20)).isoformat(), run([comment(keep)])['expiresAt'])
+            self.assertIn('after 20 minutes with no decision', f.github.data['issues/3']['body'])
+            del f.env['APPROVAL_VALID_MINUTES']
             body = f.github.data['issues/3']['body']
             self.assertIn('### What this run does', body); self.assertIn(back, body); self.assertIn('`REJECT` stops this run', body)
             self.assertLess(body.index('### What this run does'), body.index('| Item | Detail |'))
@@ -96,7 +103,7 @@ class CandidateTests(unittest.TestCase):
             # Expired window and changed issue body fail closed on the recheck path.
             receipt = {k: kept[k] for k in ('schema', 'stage', 'runId', 'planDigest', 'createdAt', 'expiresAt', 'issue')}
             self.assertIsNone(m.decision('dev', plan, verification, receipt, f.env, f.github.get, f.github.now))
-            with self.assertRaisesRegex(ValueError, 'expired'): m.decision('dev', plan, verification, receipt, f.env, f.github.get, f.github.now + timedelta(minutes=41))
+            with self.assertRaisesRegex(ValueError, 'expired'): m.decision('dev', plan, verification, receipt, f.env, f.github.get, f.github.now + timedelta(minutes=16))
             f.github.data['issues/3']['body'] += ' edited'
             with self.assertRaisesRegex(ValueError, 'issue changed'): m.decision('dev', plan, verification, receipt, f.env, f.github.get, f.github.now)
 

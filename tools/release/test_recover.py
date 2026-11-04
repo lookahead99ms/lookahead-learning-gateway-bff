@@ -1,5 +1,6 @@
 """`05 · Recover DEV` (tools/release/recover.py): park, deploy the target, fall back, park again. AWS and GitHub are the injected
 fakes of test_deploy; nothing is called for real."""
+from datetime import timedelta
 import json
 from pathlib import Path
 import tempfile
@@ -126,6 +127,11 @@ class ApprovalTests(RecoverFixture):
         for phrase in ('APPROVE RECOVER ' + planned['imageTag'], 'app-12-park-final', 'web-deploy-12-5', planned['fallbackImageTag'], 'Park', 'Fallback'):
             self.assertIn(phrase, issue['body'])
         m.verify(planned, receipt, self.env, self.root, self.get, self.now)
+        # Valid for 15 minutes from the approving comment, past the 10-minute wait: accepted at 14:59, refused at 15:00.
+        self.assertEqual(self.now.isoformat(), receipt['approvedAt'])
+        m.verify(planned, receipt, self.env, self.root, self.get, self.now + timedelta(minutes=14, seconds=59))
+        with self.assertRaisesRegex(ValueError, 'no longer valid'):
+            m.verify(planned, receipt, self.env, self.root, self.get, self.now + timedelta(minutes=15))
         self.github.comment = lambda: {'id': 8, 'user': {'login': owner.OWNER}, 'body': 'REJECT', 'created_at': receipt['createdAt'], 'updated_at': receipt['createdAt']}
         self.github.comments = [self.github.comment()]
         with self.assertRaisesRegex(ValueError, 'Owner rejected'):
@@ -135,8 +141,21 @@ class ApprovalTests(RecoverFixture):
         self.aws.serving('old')
         planned = self.recovery()
         self.github.autoApprove = False
+        # The owner has 10 minutes to answer; the wait polls every 20 seconds for exactly that window.
+        self.assertEqual(timedelta(minutes=10), m.window(planned))
+        self.assertIn('Answer within 10 minutes of this issue being created; the approval is then acted on within 15 minutes of the approving comment', m.gist(planned))
+        sleeps = []
         with self.assertRaisesRegex(TimeoutError, 'Recovery approval timed out'):
-            self.approvedRecovery(planned)
+            m.approve(planned, self.env, self.root, self.get, now=self.clock, sleep=sleeps.append)
+        self.assertEqual([20] * 30, sleeps)
+        # The repository variable sets the wait; the receipt and issue state it.
+        short = {**self.env, 'APPROVAL_WAIT_MINUTES': '4'}
+        self.assertEqual(timedelta(minutes=4), m.window(planned, short))
+        sleeps = []
+        with self.assertRaisesRegex(TimeoutError, 'Recovery approval timed out'):
+            m.approve(planned, short, self.root, self.get, now=self.clock, sleep=sleeps.append)
+        self.assertEqual([20] * 12, sleeps)
+        self.assertIn('Answer within 4 minutes of this issue being created; the approval is then acted on within 15 minutes of the approving comment', self.github.data['issues/3']['body'])
 
 
 class StageTests(RecoverFixture):
