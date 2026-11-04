@@ -167,7 +167,8 @@ class GatewayJsonContractTest {
 
     @Test void gatewayErrorsKeepStableCodesAndNeverSerializeUpstreamExceptionSecrets() {
         var handler = new GatewayErrorHandler();
-        var unavailable = handler.unavailable(new RestClientException("Bearer " + ACCESS_TOKEN + " " + settings.clientSecret()));
+        var unavailable = handler.unavailable(new RestClientException("Bearer " + ACCESS_TOKEN + " " + settings.clientSecret()),
+                new org.springframework.mock.web.MockHttpServletRequest("GET", "/bff/api/v1/me"));
         var expired = handler.expired(new OAuth2AuthorizationException(new OAuth2Error("invalid_grant", ACCESS_TOKEN, null)));
         assertThat(unavailable.getStatusCode().value()).isEqualTo(503);
         assertThat(expired.getStatusCode().value()).isEqualTo(401);
