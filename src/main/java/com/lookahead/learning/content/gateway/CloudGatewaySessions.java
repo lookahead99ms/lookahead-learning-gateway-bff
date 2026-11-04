@@ -48,12 +48,23 @@ final class CloudGatewaySessions {
             .contentType(MediaType.APPLICATION_JSON);
         if(!read)call.body(body);
         return call.exchange((sent,received)->{
-            byte[] bytes=received.getBody().readNBytes(16385);if(bytes.length>16384)throw new org.springframework.web.client.RestClientException("Invalid Domain response");
+            int status=received.getStatusCode().value();
+            byte[] bytes=received.getBody().readNBytes(16385);if(bytes.length>16384)throw unreadable(action,status,"ANSWER_TOO_LARGE","larger than 16 KB",null);
             JsonNode document;
             try {document=new JsonMapper().readTree(bytes);}
-            catch(RuntimeException malformed){throw new org.springframework.web.client.RestClientException("Invalid Domain response");}
-            if(document==null)throw new org.springframework.web.client.RestClientException("Invalid Domain response");
-            return new Result(received.getStatusCode().value(),bytes,document.path("data"));
+            catch(RuntimeException malformed){throw unreadable(action,status,"ANSWER_NOT_JSON","not JSON",malformed);}
+            if(document==null)throw unreadable(action,status,"ANSWER_EMPTY","empty",null);
+            return new Result(status,bytes,document.path("data"));
         });
+    }
+    /**
+     * DLV-969: Domain answered, but not in a form the Gateway can read. Callers report this as "Domain unavailable", so this
+     * line says what actually came back: the action, Domain's HTTP status and why (never the body or the parser's message).
+     */
+    private static org.springframework.web.client.RestClientException unreadable(String action,int status,String reason,String words,RuntimeException failure){
+        var line=OpsLog.failed("cloud-session."+action,reason).addKeyValue("upstream.service","domain").addKeyValue("upstream.status",status);
+        if(failure!=null)line=line.addKeyValue("exception.types",RequestLog.types(failure));
+        line.log("Domain's answer to cloud sign-in {} (HTTP {}) was unreadable: {}{}",action,status,words,failure==null?"":" ("+RequestLog.types(failure)+")");
+        return new org.springframework.web.client.RestClientException("Invalid Domain response");
     }
 }

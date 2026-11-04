@@ -270,6 +270,27 @@ class PasswordSignInControllerTest {
         assertThat(code(controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse()))).isEqualTo("SERVICE_UNAVAILABLE");
     }
 
+    /** DLV-969: an unsupported or incomplete Cognito step names the step; the page still only sees SERVICE_UNAVAILABLE. */
+    @Test void anUnsupportedCognitoStepIsNamedInTheLog() {
+        try (var log = new com.lookahead.gateway.LogCapture("lookahead.event")) {
+            answer = m -> InitiateAuthResponse.builder().challengeName(ChallengeNameType.SMS_MFA).session("synthetic-cognito-session").build();
+            assertThat(code(controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse()))).isEqualTo("SERVICE_UNAVAILABLE");
+            var step = log.lines().stream().filter(line -> "sign-in.cognito-step".equals(line.getKeyValuePairs().getFirst().value)).toList();
+            assertThat(step).hasSize(1);
+            assertThat(step.getFirst().getFormattedMessage()).startsWith("Cognito asked for sign-in step SMS_MFA, which our sign-in page does not support");
+            assertThat(com.lookahead.gateway.LogCapture.pairs(step.getFirst())).contains("reason=COGNITO_STEP_UNSUPPORTED", "cognito.challenge=SMS_MFA");
+            log.clear();
+            answer = m -> InitiateAuthResponse.builder().challengeName(ChallengeNameType.EMAIL_OTP).build();
+            assertThat(code(controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse()))).isEqualTo("SERVICE_UNAVAILABLE");
+            assertThat(log.messages()).contains("Cognito's sign-in answer had no tokens and no session for step EMAIL_OTP; answered 503");
+            log.clear();
+            answer = m -> InitiateAuthResponse.builder().build();
+            controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse());
+            assertThat(log.messages()).contains("Cognito's sign-in answer had no tokens and no next step; answered 503");
+            log.assertNothing(PASSWORD, "synthetic-cognito-session", "priya");
+        }
+    }
+
     @Test void signUpConfirmResendForgotAndReset() throws Exception {
         answer = m -> switch (m) {
             case "signUp" -> SignUpResponse.builder().codeDeliveryDetails(CodeDeliveryDetailsType.builder().destination("a***@e***").build()).build();

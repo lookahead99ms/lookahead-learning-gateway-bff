@@ -23,7 +23,16 @@ public final class DevWebProxy {
         return http.method(HttpMethod.valueOf(request.getMethod())).uri(java.net.URI.create(origin + path))
             .exchange((sent, received) -> {
                 byte[] bytes = received.getBody().readNBytes(16 * 1024 * 1024 + 1);
-                if (bytes.length > 16 * 1024 * 1024 || received.getStatusCode().is3xxRedirection()) return ResponseEntity.status(502).body(new byte[0]);
+                if (bytes.length > 16 * 1024 * 1024 || received.getStatusCode().is3xxRedirection()) {
+                    // DLV-969: the browser only sees 502; the log says which rule refused Web's answer.
+                    boolean redirect = received.getStatusCode().is3xxRedirection();
+                    OpsLog.failed("web.proxy", redirect ? "WEB_REDIRECT_REFUSED" : "WEB_ANSWER_TOO_LARGE").addKeyValue("upstream.service", "web")
+                        .addKeyValue("upstream.status", received.getStatusCode().value()).addKeyValue("url.path", RequestLog.path(request))
+                        .log("Web answer for {} {} refused with 502: {}", RequestLog.method(request), RequestLog.path(request),
+                            redirect ? "Web answered a redirect (HTTP " + received.getStatusCode().value() + "), which the Gateway never follows or relays"
+                                : "larger than 16 MB");
+                    return ResponseEntity.status(502).body(new byte[0]);
+                }
                 var headers = new HttpHeaders(); headers.setCacheControl("no-store"); headers.set("X-Content-Type-Options", "nosniff");
                 if (received.getHeaders().getContentType() != null) headers.setContentType(received.getHeaders().getContentType());
                 return new ResponseEntity<>(bytes, headers, received.getStatusCode());
