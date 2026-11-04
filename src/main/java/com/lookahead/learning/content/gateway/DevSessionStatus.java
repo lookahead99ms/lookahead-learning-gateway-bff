@@ -30,12 +30,21 @@ public final class DevSessionStatus implements AutoCloseable {
                 .addExecutionInterceptor(new OpsLog.SdkRetries("dynamodb",MAX_ATTEMPTS)));
     }
     DevSessionStatus(DynamoDbClient client, String table) { this.client=client; this.table=table; }
+    private final OpsLog.Repeats invalidDeadline=new OpsLog.Repeats(Duration.ofMinutes(1));
     @GetMapping("/dev/session") ResponseEntity<Map<String,Object>> status(){
         try{
             // Polled by the Web shell: a successful read logs at DEBUG; a failure, a refusal and every retry at WARN/INFO.
             var state=OpsLog.aws("dynamodb","GetItem",true,()->client.getItem(r->r.tableName(table).consistentRead(true).key(Map.of("id",AttributeValue.builder().s("dev").build())))).item();
             String deadline=state.containsKey("deadline")?state.get("deadline").s():"";
-            boolean warning=!deadline.isEmpty()&&!Instant.now().isBefore(Instant.parse(deadline).minusSeconds(900));
+            boolean warning;
+            try{warning=!deadline.isEmpty()&&!Instant.now().isBefore(Instant.parse(deadline).minusSeconds(900));}
+            catch(java.time.format.DateTimeParseException invalid){
+                // DLV-969: the table answered, but its deadline is not an instant; polled, so once a minute while it stays so.
+                if(invalidDeadline.due("DEV_STATUS_INVALID"))OpsLog.failed("dev-session.status","DEV_STATUS_INVALID")
+                    .log("DEV session status unavailable: the operations table's deadline attribute is not an ISO-8601 instant (logged at most once a minute)");
+                return ResponseEntity.status(503).header("Cache-Control","no-store").body(Map.of("code","DEV_STATUS_UNAVAILABLE"));
+            }
+            invalidDeadline.clear();
             return ResponseEntity.ok().header("Cache-Control","no-store").body(Map.of("dev",true,"deadline",deadline,"warning",warning,"maintenance",state.containsKey("operation")));
         }catch(RuntimeException unavailable){
             OpsLog.failed("dev-session.status","DEV_STATUS_UNAVAILABLE").addKeyValue("exception.types",RequestLog.types(unavailable))

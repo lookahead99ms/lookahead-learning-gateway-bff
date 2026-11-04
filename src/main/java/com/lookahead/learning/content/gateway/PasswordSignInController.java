@@ -202,14 +202,23 @@ public class PasswordSignInController {
             boolean merge = GatewaySecurityHandlers.mergeAvailable(request) && GatewayConfiguration.safeReturn(next).equals(next);
             return step("SIGNED_IN", null, next, merge);
         }
-        if (challenge == null || session == null || session.isBlank()) return failure(503, "SERVICE_UNAVAILABLE");
+        if (challenge == null || session == null || session.isBlank()) {
+            // DLV-969: Cognito answered with neither tokens nor a usable next step; the page only sees SERVICE_UNAVAILABLE.
+            OpsLog.failed("sign-in.cognito-step", "COGNITO_ANSWER_INCOMPLETE").addKeyValue("cognito.challenge", challenge == null ? "none" : challenge.toString())
+                .log("Cognito's sign-in answer had no tokens and {}; answered 503", challenge == null ? "no next step" : "no session for step " + challenge);
+            return failure(503, "SERVICE_UNAVAILABLE");
+        }
         String kind = switch (challenge) {
             case NEW_PASSWORD_REQUIRED -> "NEW_PASSWORD";
             case SOFTWARE_TOKEN_MFA -> "APP_CODE";
             case EMAIL_OTP -> "EMAIL_CODE";
             default -> null;
         };
-        if (kind == null) return failure(503, "SERVICE_UNAVAILABLE");
+        if (kind == null) {
+            OpsLog.failed("sign-in.cognito-step", "COGNITO_STEP_UNSUPPORTED").addKeyValue("cognito.challenge", challenge.toString())
+                .log("Cognito asked for sign-in step {}, which our sign-in page does not support (check the pool's MFA and sign-in settings); answered 503", challenge);
+            return failure(503, "SERVICE_UNAVAILABLE");
+        }
         request.getSession(true).setAttribute(PENDING, new Pending(username, challenge.toString(), session, clock.instant().plus(CHALLENGE_WINDOW), returnTo));
         return step(kind, null);
     }

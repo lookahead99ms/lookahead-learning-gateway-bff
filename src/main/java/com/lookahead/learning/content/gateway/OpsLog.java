@@ -79,6 +79,26 @@ final class OpsLog {
 
     static long since(long started) { return (System.nanoTime() - started) / 1_000_000; }
 
+    /**
+     * For a line on a hot path (a polled route, every request): due when the key changes, then at most once per
+     * {@code every} while it stays the same. {@link #clear} after recovery so the next failure logs at once.
+     */
+    static final class Repeats {
+        private final long everyNanos;
+        private final java.util.function.LongSupplier clock;
+        private String last;
+        private long at;
+        Repeats(Duration every) { this(every, System::nanoTime); }
+        Repeats(Duration every, java.util.function.LongSupplier clock) { this.everyNanos = every.toNanos(); this.clock = clock; }
+        synchronized boolean due(String key) {
+            long now = clock.getAsLong();
+            if (key.equals(last) && now - at < everyNanos) return false;
+            last = key; at = now;
+            return true;
+        }
+        synchronized void clear() { last = null; }
+    }
+
     /** The path only: never the query, at most 200 characters, and no line breaks to forge a second line. */
     static String path(URI uri) {
         String path = uri.getRawPath() == null ? "" : uri.getRawPath().replaceAll("[\\r\\n\\t]", "_");

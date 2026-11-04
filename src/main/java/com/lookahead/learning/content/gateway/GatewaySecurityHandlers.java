@@ -192,7 +192,10 @@ public class GatewaySecurityHandlers {
         String code = error instanceof org.springframework.security.oauth2.core.OAuth2AuthenticationException oauth && oauth.getError() != null
                 && oauth.getError().getErrorCode() != null && oauth.getError().getErrorCode().matches("[a-z_]{1,64}")
                 ? oauth.getError().getErrorCode() : "authentication_failed";
+        // The cause types (a key, the message is unchanged) say whether Cognito answered no or could not be reached for the
+        // token, JWKS or user-info call; never a message.
         OpsLog.refused("sign-in.oauth", "OAUTH_" + code.toUpperCase(java.util.Locale.ROOT)).addKeyValue("oauth.code", code)
+                .addKeyValue("exception.types", RequestLog.types(error))
                 .log("OAuth sign-in failed at the callback: {}", code);
         // Outside an open DEV gate the Web sign-in page is unreachable, so the gate page carries the message (DLV-969).
         if (gate.isPresent() && !DevAdmission.open(DevAdmission.current(request), java.time.Instant.now())) {

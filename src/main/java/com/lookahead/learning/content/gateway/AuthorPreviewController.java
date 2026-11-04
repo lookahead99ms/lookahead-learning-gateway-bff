@@ -42,9 +42,11 @@ class AuthorPreviewController {
             return previews.fetch(request.getMethod(), request.getRequestURI(), request.getQueryString(),
                     client.getAccessToken().getTokenValue(),CloudGatewaySessions.proof(request,false));
         } catch (OAuth2AuthorizationException error) {
-            return AuthorPreviewProxy.empty(401);
+            String code = error.getError() != null && error.getError().getErrorCode() != null && error.getError().getErrorCode().matches("[a-z_]{1,64}")
+                    ? error.getError().getErrorCode() : "unknown";
+            return AuthorPreviewProxy.failed(401, "SESSION_EXPIRED", "the provider refused to renew the sign-in (" + code + ")");
         } catch (RestClientException error) {
-            return AuthorPreviewProxy.empty(503);
+            return AuthorPreviewProxy.failed(503, "TOKEN_REFRESH_UNAVAILABLE", "the sign-in could not be renewed (" + RequestLog.types(error) + ")");
         }
     }
 }

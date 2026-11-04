@@ -27,8 +27,13 @@ public record DevServiceOrigins(String domain, String web) {
     }
 
     public static DevServiceOrigins of(String domain, String web) {
-        if (!allowed(domain, DOMAIN, TRANSITIONAL_DOMAIN) || !allowed(web, WEB, TRANSITIONAL_WEB))
-            throw new IllegalStateException("Explicit stable DEV Domain and Web upstreams required");
+        // DLV-969: a refused start names the variable that is wrong and the name it must have; never the value it had.
+        if (!allowed(domain, DOMAIN, TRANSITIONAL_DOMAIN))
+            throw com.lookahead.gateway.StartupLog.refused(DOMAIN_PROPERTY + " (LOOKAHEAD_DOMAIN_UPSTREAM, expected " + DOMAIN + ")",
+                    domain == null || domain.isBlank() ? "MISSING" : "NOT_ALLOWED", "Explicit stable DEV Domain and Web upstreams required");
+        if (!allowed(web, WEB, TRANSITIONAL_WEB))
+            throw com.lookahead.gateway.StartupLog.refused(WEB_PROPERTY + " (LOOKAHEAD_WEB_UPSTREAM, expected " + WEB + ")",
+                    web == null || web.isBlank() ? "MISSING" : "NOT_ALLOWED", "Explicit stable DEV Domain and Web upstreams required");
         return new DevServiceOrigins(domain, web);
     }
 

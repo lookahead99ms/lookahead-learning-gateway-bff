@@ -184,4 +184,100 @@ class InjectedCredentialsTest {
         assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
         assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"web"));
     }
+
+    // ----- DLV-969 (owner, 2026-11-04): a rejected credential is named in the log, its value never is -----
+
+    /** Runs the validator and returns the one refusal line's setting and reason; the exception stays unchanged. */
+    List<String> refusal(Map<String,String> values, String service) {
+        try (var log = new com.lookahead.gateway.LogCapture("lookahead.lifecycle")) {
+            var failure = assertThrows(IllegalStateException.class, () -> InjectedCredentialValidator.properties(values, service));
+            assertEquals("Injected credential validation failed; application startup denied", failure.getMessage());
+            assertNull(failure.getCause());
+            assertEquals(1, log.lines().size());
+            assertEquals(ch.qos.logback.classic.Level.WARN, log.last().getLevel());
+            var secrets = new ArrayList<String>(List.of("BEGIN", "PRIVATE KEY", "synthetic-gateway-secret", "synthetic-oauth-secret", "synthetic-admission-secret",
+                    "SyntheticClient1", "SyntheticClient2", "aaaaaaaaaaaaaaaa"));
+            for (String value : values.values()) if (value != null && value.length() > 12) secrets.add(value.strip().substring(0, 12));
+            secrets.remove("lookahead-tl");  // the schema's value is a fixed, public name
+            // The message ends in "startup denied" on purpose: the deploy's log check fails a start on it.
+            log.assertNothing(secrets.toArray(String[]::new));
+            var pairs = com.lookahead.gateway.LogCapture.pairs(log.last());
+            return List.of(pairs.stream().filter(p -> p.startsWith("setting=")).findFirst().orElseThrow().substring(8),
+                    pairs.stream().filter(p -> p.startsWith("reason=")).findFirst().orElseThrow().substring(7));
+        }
+    }
+
+    @Test void everyMissingInputIsNamed() throws Exception {
+        for (String service : List.of("gateway", "domain")) {
+            var keys = new ArrayList<>(input().keySet());
+            if (service.equals("domain")) keys.removeAll(List.of("LOOKAHEAD_TLS_CLIENT_CERTIFICATE", "LOOKAHEAD_TLS_CLIENT_KEY", "APP_OAUTH_CLIENT_ID",
+                    "LOOKAHEAD_GATEWAY_CLIENT_SECRET", "LOOKAHEAD_ADMISSION_CLIENT_ID", "LOOKAHEAD_ADMISSION_CLIENT_SECRET"));
+            else keys.remove("LOOKAHEAD_DOMAIN_DB_PASSWORD");
+            for (String key : keys) {
+                var values = input(); values.remove(key);
+                assertEquals(List.of("injected credential " + key, "MISSING"), refusal(values, service), service + " " + key);
+            }
+        }
+        assertEquals(List.of("injected credential service", "UNKNOWN_SERVICE"), refusal(input(), "web"));
+    }
+
+    @Test void eachRejectionSaysWhichInputAndWhy() throws Exception {
+        record Case(String key, String value, String service, String setting, String reason) { }
+        command("req","-x509","-newkey","rsa:2048","-nodes","-keyout","other.key","-out","other.pem","-days","5","-subj","/CN=Untrusted root","-addext","basicConstraints=critical,CA:TRUE");
+        leaf("purpose", "/CN=dev.example.com", "dev.example.com", "clientAuth", "3", "server.key");
+        leaf("short", "/CN=dev.example.com", "dev.example.com", "serverAuth", "1", "server.key");
+        var cases = List.of(
+            new Case("LOOKAHEAD_TLS_SCHEMA", "lookahead-tls/v0", "gateway", "LOOKAHEAD_TLS_SCHEMA", "UNSUPPORTED_SCHEMA"),
+            new Case("LOOKAHEAD_TLS_SERVER_NAME", "wrong.example.com", "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "NAME_NOT_IN_SUBJECT_ALTERNATIVE_NAMES"),
+            new Case("LOOKAHEAD_TLS_SERVER_NAME", "Not A Name", "domain", "LOOKAHEAD_TLS_SERVER_NAME", "NOT_A_LOWER_CASE_HOST_NAME"),
+            new Case("LOOKAHEAD_TLS_SERVER_KEY", text("ca.key"), "domain", "LOOKAHEAD_TLS_SERVER_KEY", "KEY_DOES_NOT_MATCH_CERTIFICATE"),
+            new Case("LOOKAHEAD_TLS_SERVER_KEY", text("client.key"), "domain", "LOOKAHEAD_TLS_SERVER_KEY", "KEY_UNREADABLE"),
+            new Case("LOOKAHEAD_TLS_SERVER_KEY", "-----BEGIN RSA PRIVATE KEY-----\ninvalid", "domain", "LOOKAHEAD_TLS_SERVER_KEY", "NOT_ONE_PKCS8_PEM_BLOCK"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("ca.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "LEAF_IS_A_CA_CERTIFICATE"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("purpose.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "NOT_FOR_SERVER_AUTHENTICATION"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("short.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "EXPIRES_WITHIN_ONE_DAY"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", "file:/tmp/forbidden", "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "CERTIFICATE_UNREADABLE"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", "x".repeat(65537), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "LONGER_THAN_64_KB"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("server.pem").repeat(9), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "MORE_THAN_8_CERTIFICATES"),
+            new Case("LOOKAHEAD_TLS_TRUST", text("server.pem"), "domain", "LOOKAHEAD_TLS_TRUST", "NOT_A_SELF_SIGNED_CA"),
+            new Case("LOOKAHEAD_TLS_TRUST", text("other.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE (its chain to LOOKAHEAD_TLS_TRUST)", "CHAIN_NOT_TRUSTED"),
+            new Case("LOOKAHEAD_TLS_TRUST", text("other.pem"), "gateway", "LOOKAHEAD_TLS_CLIENT_CERTIFICATE (its chain to LOOKAHEAD_TLS_TRUST)", "CHAIN_NOT_TRUSTED"),
+            new Case("LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "short", "domain", "LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "LENGTH_OUTSIDE_16_TO_4096"),
+            new Case("LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "synthetic-secret\nvalue", "domain", "LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "CONTROL_CHARACTERS"),
+            new Case("APP_OAUTH_CLIENT_ID", "invalid-id", "gateway", "APP_OAUTH_CLIENT_ID", "NOT_1_TO_128_ALPHANUMERIC_CHARACTERS"),
+            new Case("LOOKAHEAD_DOMAIN_DB_PASSWORD", "wrongshape-but-long-enough", "domain", "LOOKAHEAD_DOMAIN_DB_PASSWORD", "NOT_48_ALPHANUMERIC_CHARACTERS"));
+        for (var test : cases) {
+            var values = input(); values.put(test.key(), test.value());
+            assertEquals(List.of("injected credential " + test.setting(), test.reason()), refusal(values, test.service()), test.toString().substring(0, 80));
+        }
+        // The client certificate must not reuse the server's key, and its subject must be exactly the Gateway name.
+        leaf("same", "/CN=gateway.lookahead-dev.internal", "gateway.lookahead-dev.internal", "clientAuth", "3", "server.key");
+        var same = input(); same.put("LOOKAHEAD_TLS_CLIENT_CERTIFICATE", text("same.pem")); same.put("LOOKAHEAD_TLS_CLIENT_KEY", text("server.key"));
+        assertEquals(List.of("injected credential LOOKAHEAD_TLS_CLIENT_CERTIFICATE", "SAME_KEY_AS_SERVER_CERTIFICATE"), refusal(same, "gateway"));
+        leaf("extra", "/O=Unexpected/CN=gateway.lookahead-dev.internal", "gateway.lookahead-dev.internal", "clientAuth", "3", "client.key");
+        var extra = input(); extra.put("LOOKAHEAD_TLS_CLIENT_CERTIFICATE", text("extra.pem"));
+        assertEquals(List.of("injected credential LOOKAHEAD_TLS_CLIENT_CERTIFICATE", "CLIENT_SUBJECT_NOT_EXACTLY_CN"), refusal(extra, "gateway"));
+        for (String days : List.of("expired", "future")) {
+            leaf("dated", "/CN=dev.example.com", "dev.example.com", "serverAuth", days, "server.key");
+            var dated = input(); dated.put("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("dated.pem"));
+            assertEquals(List.of("injected credential LOOKAHEAD_TLS_SERVER_CERTIFICATE", days.equals("expired") ? "CERTIFICATE_EXPIRED" : "CERTIFICATE_NOT_YET_VALID"),
+                    refusal(dated, "domain"));
+        }
+    }
+
+    @Test void anUnreadableVariableIsNamedWithoutItsValue() {
+        try (var log = new com.lookahead.gateway.LogCapture("lookahead.lifecycle"); var context = new GenericApplicationContext()) {
+            context.getEnvironment().setActiveProfiles("lower-cost-dev");
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("synthetic", Map.of("LOOKAHEAD_TLS_TRUST", "${private-marker}")));
+            var failure = assertThrows(IllegalStateException.class, () -> new InjectedCredentials().initialize(context));
+            assertEquals("Injected credential validation failed; application startup denied", failure.getMessage());
+            assertTrue(com.lookahead.gateway.LogCapture.pairs(log.last()).containsAll(List.of("setting=injected credential LOOKAHEAD_TLS_TRUST",
+                    "reason=UNRESOLVED_PLACEHOLDER")));
+            log.assertNothing("private-marker");
+        }
+        assertEquals("InvalidAlgorithmParameterException", InjectedCredentialValidator.reason(new java.security.InvalidAlgorithmParameterException()));
+        assertEquals("CHAIN_NOT_TRUSTED", InjectedCredentialValidator.reason(new java.security.cert.CertPathBuilderException()));
+        assertEquals("KEY_DOES_NOT_MATCH_CERTIFICATE", InjectedCredentialValidator.reason(new java.security.SignatureException()));
+        assertEquals("CERTIFICATE_UNREADABLE", InjectedCredentialValidator.reason(new java.security.cert.CertificateException()));
+    }
 }
