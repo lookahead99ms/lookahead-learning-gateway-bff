@@ -77,6 +77,9 @@ public class GatewayController {
         response.setHeader("Cache-Control","no-store");return ApiResponse.success(Map.of("logoutUrl",url));
     }
     private ApiResponse<Map<String,String>> cloudLogout(HttpServletRequest request,HttpServletResponse response,Authentication authentication) {
+        // DLV-969 (2026-11-04): Sign out from a test session started from your own sign-in signs you out of that sign-in.
+        if(TestSessionController.active(authentication)&&TestSessionController.staffSignIn(request) instanceof org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken staff)
+            authentication=staff;
         // DLV-969 S35: a test session has no provider sign-in; it ends here and the DEV gate stays open.
         if(TestSessionController.active(authentication)) {
             DevAdmission.clearLearner(request);
