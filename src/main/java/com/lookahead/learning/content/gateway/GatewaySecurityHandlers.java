@@ -63,9 +63,40 @@ public class GatewaySecurityHandlers {
         return "password";
     }
 
+    /** DLV-969 S36: request attribute set when Domain admitted the sign-in and answered {@code mergeAvailable: true}. */
+    static final String MERGE_AVAILABLE = "lookaheadMergeAvailable";
+    /** DLV-969 S36: session attribute set when a resolved sign-in challenge answered {@code mergeAvailable: true}; used once by /bff/login. */
+    static final String MERGE_AFTER_CHALLENGE = "lookaheadMergeAfterChallenge";
+
     void loginSucceeded(HttpServletRequest request, HttpServletResponse response,
                         Authentication authentication) throws IOException {
-        response.sendRedirect(settings.frontend() + completeSignIn(request, response, authentication));
+        String next = completeSignIn(request, response, authentication);
+        if (mergeAvailable(request)) {
+            // DLV-969 S36: the redirect sign-in cannot show the inbox panel, so the browser goes to the merge offer first.
+            OpsLog.success("sign-in.merge-offer").addKeyValue("provider", settings.cloud() ? provider(authentication) : "identity").addKeyValue("via", "oauth")
+                    .log("Sign-in completed and other accounts share this person's verified email: redirected to the merge offer page");
+            next = mergeOffer(next);
+        }
+        response.sendRedirect(settings.frontend() + next);
+    }
+
+    /** True only after this request's sign-in was admitted with a literal {@code mergeAvailable: true} (DLV-969 S36). */
+    static boolean mergeAvailable(HttpServletRequest request) {
+        return Boolean.TRUE.equals(request.getAttribute(MERGE_AVAILABLE));
+    }
+
+    /** DLV-969 S36: only a JSON boolean {@code true} counts; a string, number or missing field never does. */
+    static boolean literalTrue(tools.jackson.databind.JsonNode value) {
+        return value != null && value.isBoolean() && value.booleanValue();
+    }
+
+    /**
+     * DLV-969 S36: a redirect sign-in cannot show the inbox panel, so the merge page offers the email. A merge target that
+     * already has its query (safeReturn allows only the email token and/or offer=1) stays; a bare /account/merge gets the offer.
+     */
+    static String mergeOffer(String next) {
+        if (next.startsWith("/account/merge?")) return next;
+        return "/account/merge?offer=1";
     }
 
     /**
@@ -100,7 +131,10 @@ public class GatewaySecurityHandlers {
                 if(admission.status()!=200)throw new IllegalStateException("Domain rejected admission");
                 reason="INVALID_DOMAIN_ANSWER";
                 String challenge=admission.data().path("challengeToken").asString("");
+                // DLV-969 S36: a fresh admission decides afresh; an offer left by an earlier challenge never carries over.
+                request.getSession().removeAttribute(MERGE_AFTER_CHALLENGE);
                 if(!challenge.isEmpty()) {
+                    // DLV-969 S36: still at the challenge, so no offer yet; the replace answer carries it once resolved.
                     if(!challenge.matches("[A-Za-z0-9_-]{43}"))throw new IllegalStateException("Invalid challenge");
                     session=request.getSession();
                     session.setAttribute(CloudGatewaySessions.CHALLENGE,challenge);
@@ -112,8 +146,12 @@ public class GatewaySecurityHandlers {
                 }
                 if(admission.data().path("signInId").asString("").isEmpty())throw new IllegalStateException("Missing admission");
                 request.getSession().removeAttribute(CloudGatewaySessions.CHALLENGE);
-                OpsLog.success("sign-in.completed").addKeyValue("provider",provider).addKeyValue("via",via)
-                    .log("Sign-in completed ({} via {}): Domain admitted the account",provider,via);
+                // DLV-969 S36: only an admitted sign-in (never a waiting or challenged one) carries the merge offer on.
+                boolean merge=literalTrue(admission.data().path("mergeAvailable"));
+                if(merge)request.setAttribute(MERGE_AVAILABLE,Boolean.TRUE);
+                OpsLog.success("sign-in.completed").addKeyValue("provider",provider).addKeyValue("via",via).addKeyValue("merge.available",merge)
+                    .log(merge?"Sign-in completed ({} via {}): Domain admitted the account and other accounts share its verified email (merge offered)"
+                        :"Sign-in completed ({} via {}): Domain admitted the account",provider,via);
             } catch(RuntimeException rejected) {
                 boolean pending=rejected instanceof AdmissionPending;
                 if(pending)reason="ACCOUNT_ADMISSION_REQUIRED";

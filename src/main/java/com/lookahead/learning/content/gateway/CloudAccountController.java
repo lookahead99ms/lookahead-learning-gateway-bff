@@ -67,7 +67,11 @@ public class CloudAccountController {
             if(action.equals("replace")) {
                 String owner=result.data().path("accountId").asString("");if(owner.isEmpty())return failure(503,"SERVICE_UNAVAILABLE");
                 // Retain the challenge secret for an owner-bound retry until the redirect completes.
-                return ResponseEntity.ok().header("Cache-Control","no-store").body(ApiResponse.success(Map.of("accountId",owner)));
+                var data=new java.util.LinkedHashMap<String,Object>();data.put("accountId",owner);
+                // DLV-969 S36: Domain decides mergeAvailable once the challenge is resolved; /bff/login then sends the offer.
+                if(GatewaySecurityHandlers.literalTrue(result.data().path("mergeAvailable"))){data.put("mergeAvailable",true);request.getSession().setAttribute(GatewaySecurityHandlers.MERGE_AFTER_CHALLENGE,Boolean.TRUE);}
+                else request.getSession().removeAttribute(GatewaySecurityHandlers.MERGE_AFTER_CHALLENGE);
+                return ResponseEntity.ok().header("Cache-Control","no-store").body(ApiResponse.success(data));
             }
             if(ended){
                 clients.removeAuthorizedClient("lookahead",authentication,request,response);

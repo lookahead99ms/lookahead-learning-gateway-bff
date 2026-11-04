@@ -33,6 +33,33 @@ class GatewayReturnDestinationTest {
         assertThat(GatewayConfiguration.safeReturn(destination)).isEqualTo("/");
     }
 
+    /** DLV-969 S36: the merge page with its email token and/or the offer flag; T is 43 url-safe characters. */
+    static final String T = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Z";
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/account/merge", "/account/merge?offer=1", "/account/merge?token=" + T,
+            "/account/merge?token=" + T + "&offer=1", "/account/merge?offer=1&token=" + T})
+    void preservesTheMergePageWithItsTokenOrOffer(String destination) {
+        assertThat(T).hasSize(43);
+        assertThat(GatewayConfiguration.safeReturn(destination)).isEqualTo(destination);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/account/merge?", "/account/merge?offer=0", "/account/merge?offer=2", "/account/merge?offer=1&offer=1",
+            "/account/merge?offer", "/account/merge?offer=1&", "/account/merge?&offer=1", "/account/merge?OFFER=1",
+            "/account/merge?token=", "/account/merge?token=short", "/account/merge?token=" + T + "x", "/account/merge?token=" + T + "&token=" + T,
+            "/account/merge?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_%5A", "/account/merge?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_.",
+            "/account/merge?token=" + T + "%26offer=1", "/account/merge?TOKEN=" + T, "/account/merge?token=" + T + "&next=/admin",
+            "/account/merge?returnTo=//outside.example", "/account/merge?offer=1#x", "/account/merge#offer=1", "/account/merge#", "/account/merge?#", "/account/merge?offer=1#", "/account/merge?token=" + T + "#t",
+            "/account/merge/", "/account/merge/x?offer=1", "/account/mergex?offer=1", "/account/merge;x?offer=1",
+            "/account%2Fmerge?offer=1", "/account%2fmerge", "/account/merg%65?offer=1", "/account/merge%3Foffer=1",
+            "//account/merge?offer=1", "///account/merge?offer=1", "//outside.example/account/merge?offer=1",
+            "https://outside.example/account/merge?offer=1", "/account/../account/merge?offer=1", "/account/./merge?offer=1",
+            "/account\\merge?offer=1", "/account/merge?offer=1\r\nLocation: outside", "/account/merge?offer=1\t", "account/merge?offer=1"})
+    void rejectsAnyOtherMergeDestination(String destination) {
+        assertThat(GatewayConfiguration.safeReturn(destination)).isEqualTo("/");
+    }
+
     @Test void missingDestinationDefaultsToHome() {
         assertThat(GatewayConfiguration.safeReturn(null)).isEqualTo("/");
     }
