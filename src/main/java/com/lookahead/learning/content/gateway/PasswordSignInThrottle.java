@@ -24,10 +24,22 @@ final class PasswordSignInThrottle {
     PasswordSignInThrottle(Clock clock) { this.clock = clock; }
 
     /** Records one attempt; false when the address or the account has used its allowance in the window. */
-    boolean allow(String address, String account) {
+    boolean allow(String address, String account) { return allow("password", address, account); }
+
+    /**
+     * As {@link #allow(String, String)}; a refusal writes one {@code lookahead.limit} WARN line per limit reached, naming
+     * the limit (per address or per account), its size and window and the page {@code action}. Never the address or account.
+     */
+    boolean allow(String action, String address, String account) {
         if (attempts.size() > MAX_KEYS) prune();
         boolean byAddress = record("ip:" + (address == null ? "" : address), PER_ADDRESS);
         boolean byAccount = account == null || account.isBlank() || record("user:" + account.strip().toLowerCase(Locale.ROOT), PER_ACCOUNT);
+        if (!byAddress) OpsLog.limit("password-pages.per-address", PER_ADDRESS, WINDOW, action,
+                "Rate limit reached: {} refused, more than {} password-page attempts from one address in {} minutes",
+                action, PER_ADDRESS, WINDOW.toMinutes());
+        if (!byAccount) OpsLog.limit("password-pages.per-account", PER_ACCOUNT, WINDOW, action,
+                "Rate limit reached: {} refused, more than {} password-page attempts for one account in {} minutes",
+                action, PER_ACCOUNT, WINDOW.toMinutes());
         return byAddress && byAccount;
     }
 

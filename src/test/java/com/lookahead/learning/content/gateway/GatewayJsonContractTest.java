@@ -167,8 +167,23 @@ class GatewayJsonContractTest {
 
     @Test void gatewayErrorsKeepStableCodesAndNeverSerializeUpstreamExceptionSecrets() {
         var handler = new GatewayErrorHandler();
-        var unavailable = handler.unavailable(new RestClientException("Bearer " + ACCESS_TOKEN + " " + settings.clientSecret()));
-        var expired = handler.expired(new OAuth2AuthorizationException(new OAuth2Error("invalid_grant", ACCESS_TOKEN, null)));
+        var unavailable = handler.unavailable(new RestClientException("Bearer " + ACCESS_TOKEN + " " + settings.clientSecret()),
+                new org.springframework.mock.web.MockHttpServletRequest("GET", "/bff/api/v1/me"));
+        var events = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var capture = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>(); capture.start(); events.addAppender(capture);
+        org.springframework.http.ResponseEntity<?> expired;
+        try {
+            expired = handler.expired(new OAuth2AuthorizationException(new OAuth2Error("invalid_grant", ACCESS_TOKEN, null)),
+                    new org.springframework.mock.web.MockHttpServletRequest("GET", "/bff/api/v1/me"));
+        } finally { events.detachAppender(capture); }
+        // DLV-969: the expiry is logged with its stable reason and the OAuth code, never the provider's description.
+        assertThat(capture.list).hasSize(1);
+        assertThat(capture.list.getFirst().getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+        assertThat(capture.list.getFirst().getFormattedMessage()).isEqualTo(
+                "Session expired for GET /bff/api/v1/me: the provider refused to renew the sign-in (invalid_grant); the person must sign in again")
+                .doesNotContain(ACCESS_TOKEN);
+        assertThat(capture.list.getFirst().getKeyValuePairs()).extracting(pair -> pair.key + "=" + pair.value)
+                .contains("event.action=sign-in.session", "event.outcome=refused", "reason=SESSION_EXPIRED", "oauth.code=invalid_grant");
         assertThat(unavailable.getStatusCode().value()).isEqualTo(503);
         assertThat(expired.getStatusCode().value()).isEqualTo(401);
         for (var response : List.of(unavailable, expired)) {

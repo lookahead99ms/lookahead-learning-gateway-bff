@@ -62,7 +62,14 @@ class TestSessionIntegrationTest {
     @Autowired ClientRegistrationRepository registrations;
     @Autowired org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository authorizedClients;
     MockMvc mvc;
-    @BeforeEach void reset(){fixture.server.reset();mvc=MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();SecurityContextHolder.clearContext();}
+    @BeforeEach void reset(){fixture.server.reset();mvc=MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).addFilters(new SignOutLog()).build();SecurityContextHolder.clearContext();
+        events.start();((ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event")).addAppender(events);}
+    @org.junit.jupiter.api.AfterEach void detach(){((ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event")).detachAppender(events);events.stop();
+        // DLV-969: no test-session line names the gate holder or carries their sub; test account ids (UUIDs) only.
+        assertThat(events.list).allSatisfy(line->assertThat(line.getFormattedMessage()+OpsLogTest.pairs(line)).doesNotContain("admin@example.test","sub-admin",settings.gatewaySecret()));}
+    /** The lookahead.event lines each test writes. */
+    final ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> events=new ch.qos.logback.core.read.ListAppender<>();
+    java.util.List<String> said(){return events.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).toList();}
 
     /** A browser whose DEV gate an admin opened, now signed out of the platform. */
     MockHttpSession gate(){
@@ -133,6 +140,7 @@ class TestSessionIntegrationTest {
         var out=mvc.perform(post("/bff/api/v1/auth/logout").session(session).header("X-CSRF-TOKEN",csrf(session)))
             .andExpect(status().isOk()).andExpect(jsonPath("data.logoutUrl").value("https://learn.example.test/sign-in")).andReturn();
         var fresh=(MockHttpSession)out.getRequest().getSession(false);
+        assertThat(said()).contains("Test session started while signed out: now using test account "+LEARNER,"Signed out of test account "+LEARNER+"; the DEV gate stays open");
         assertThat(fresh).isNotNull();assertThat(fresh.getAttribute(DevAdmission.ATTRIBUTE)).isNotNull();
         assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
         mvc.perform(get("/bff/api/v1/auth/me").session(fresh)).andExpect(status().isUnauthorized());
@@ -159,6 +167,9 @@ class TestSessionIntegrationTest {
         domain("/internal/v1/test-sessions/start",HttpMethod.POST,"{\"code\":\"TEST_SESSION_FORBIDDEN\",\"message\":\"Your role cannot use this test account.\"}",org.springframework.http.HttpStatus.FORBIDDEN);
         mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
             .andExpect(status().isForbidden()).andExpect(jsonPath("code").value("TEST_SESSION_FORBIDDEN"));
+        assertThat(said()).contains("Test session request refused: DEV_ADMISSION_REQUIRED (the DEV gate is not open in this session, HTTP 401)",
+            "Test session request refused: TEST_ACCOUNT_REQUIRED (no valid test account id was sent, HTTP 422)",
+            "Test session request refused: TEST_SESSION_FORBIDDEN (Domain refused the switch, HTTP 403)");
         assertThat(session.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
         fixture.server.verify();fixture.server.reset();
         domain("/internal/v1/test-sessions/start",HttpMethod.POST,"{}",org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR);
@@ -168,6 +179,8 @@ class TestSessionIntegrationTest {
         fixture.server.reset();fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/test-sessions/start")).andRespond(withException(new java.io.IOException("down")));
         mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
             .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("code").value("SERVICE_UNAVAILABLE"));
+        assertThat(said()).contains("Test session request refused: HTTP_503 (the test-session service was unavailable, HTTP 503)",
+            "Test session request could not reach Domain (ResourceAccessException < IOException)");
     }
 
     static final String SECOND = "7d1c0b9a-2e3f-4a5b-9c8d-1e2f3a4b5c6d";
@@ -224,6 +237,13 @@ class TestSessionIntegrationTest {
         // Not in a test session: nothing to end.
         mvc.perform(post("/bff/api/v1/auth/test-session/end").session(session).header("X-CSRF-TOKEN",csrf(session)))
             .andExpect(status().isConflict()).andExpect(jsonPath("code").value("NO_TEST_SESSION"));
+        // DLV-969 (owner, 2026-11-04): the switch, the switch between test accounts, Back to my account and the refusal, each logged.
+        assertThat(said()).contains("Test session started from the staff sign-in: now using test account "+LEARNER+" (the staff sign-in is kept for Back to my account)",
+            "Test session switched from test account "+LEARNER+" to test account "+SECOND,
+            "Back to my account: left test account "+SECOND+" and restored the staff sign-in",
+            "Test session request refused: NO_TEST_SESSION (no test account is in use, HTTP 409)");
+        assertThat(events.list.stream().filter(line->line.getFormattedMessage().startsWith("Test session switched from test account")).findFirst().map(OpsLogTest::pairs).orElseThrow())
+            .contains("event.action=test-session.switched","event.outcome=success","testAccount.id="+SECOND,"testAccount.previousId="+LEARNER,"from=test-account");
         // Without the CSRF token, Back to my account does nothing.
         fixture.server.reset();
         var another=started(gate());
@@ -238,6 +258,7 @@ class TestSessionIntegrationTest {
         var out=mvc.perform(post("/bff/api/v1/auth/test-session/end").session(session).header("X-CSRF-TOKEN",csrf(session)))
             .andExpect(status().isOk()).andExpect(jsonPath("data.next").value("/sign-in")).andReturn();
         var fresh=(MockHttpSession)out.getRequest().getSession(false);
+        assertThat(said()).contains("Test session ended: test account "+LEARNER+" signed out, no staff sign-in to return to; the DEV gate stays open");
         assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();assertThat(fresh.getAttribute(DevAdmission.ATTRIBUTE)).isNotNull();
         // The gate gone: the session no longer counts as a test session.
         var gone=started(gate());gone.removeAttribute(DevAdmission.ATTRIBUTE);
@@ -260,5 +281,6 @@ class TestSessionIntegrationTest {
         assertThat(fresh.getAttribute(TestSessionController.STAFF_SIGN_IN)).isNull();
         assertThat(fresh.getAttribute(DevAdmission.ATTRIBUTE)).isNotNull();
         fixture.server.verify();
+        assertThat(said()).contains("Signed out of test account "+LEARNER+" and of the staff sign-in kept behind it");
     }
 }

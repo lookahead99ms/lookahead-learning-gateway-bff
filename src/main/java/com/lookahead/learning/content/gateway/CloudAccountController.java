@@ -46,20 +46,30 @@ public class CloudAccountController {
     private ResponseEntity<?> forward(HttpServletRequest request,HttpServletResponse response,Authentication authentication,Map<String,Object> body){
         String path=request.getRequestURI();String action=path.substring(path.lastIndexOf('/')+1);
         if(action.equals("sign-ins"))action="inventory";if(action.equals("sign-in-challenge"))action="challenge";
-        if(CloudGatewaySessions.restricted(request)&&!java.util.Set.of("challenge","replace","cancel").contains(action))return failure(401,"SIGN_IN_CHALLENGE_REQUIRED");
+        // DLV-969: account actions are logged as account.<action> (revoke, label, password, ...); reads only when they fail.
+        String event="account."+action;
+        if(CloudGatewaySessions.restricted(request)&&!java.util.Set.of("challenge","replace","cancel").contains(action))return refused(event,failure(401,"SIGN_IN_CHALLENGE_REQUIRED"),"the person must first choose which active sign-in to end");
         // DLV-969 S35: a test account has no sign-in, profile or password of its own to show or change.
-        if(TestSessionController.active(authentication))return failure(409,"TEST_SESSION");
+        if(TestSessionController.active(authentication))return refused(event,failure(409,"TEST_SESSION"),"a test account has no sign-in, profile or password of its own");
         try {
             var client=manager.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead").principal(authentication).attributes(a->{a.put(HttpServletRequest.class.getName(),request);a.put(HttpServletResponse.class.getName(),response);}).build());
-            if(client==null)return failure(401,"AUTHENTICATION_REQUIRED");
+            if(client==null)return refused(event,failure(401,"AUTHENTICATION_REQUIRED"),"this session holds no provider tokens");
             var result=sessions.call(action,client.getAccessToken().getTokenValue(),request,body);
-            if(result.status()!=200)return ResponseEntity.status(result.status()>=500?503:result.status()).header("Cache-Control","no-store").contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(result.body());
+            if(result.status()!=200){
+                String code=OpsLog.code(result.body());code=code==null?"HTTP_"+result.status():code;
+                (result.status()>=500?OpsLog.failed(event,code):OpsLog.refused(event,code)).addKeyValue("upstream.status",result.status())
+                    .log("Account action {} refused by Domain: {} (HTTP {})",action,code,result.status());
+                return ResponseEntity.status(result.status()>=500?503:result.status()).header("Cache-Control","no-store").contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(result.body());
+            }
+            boolean ended=action.equals("cancel")||result.data().path("reauthenticationRequired").asBoolean(false);
+            if(body!=null)OpsLog.success(event).addKeyValue("signIn.ended",ended)
+                .log(ended?"Account action {} done; this sign-in ends and the person signs in again":"Account action {} done",action);
             if(action.equals("replace")) {
                 String owner=result.data().path("accountId").asString("");if(owner.isEmpty())return failure(503,"SERVICE_UNAVAILABLE");
                 // Retain the challenge secret for an owner-bound retry until the redirect completes.
                 return ResponseEntity.ok().header("Cache-Control","no-store").body(ApiResponse.success(Map.of("accountId",owner)));
             }
-            if(action.equals("cancel")||result.data().path("reauthenticationRequired").asBoolean(false)){
+            if(ended){
                 clients.removeAuthorizedClient("lookahead",authentication,request,response);
                 var session=request.getSession(false);if(session!=null)session.invalidate();SecurityContextHolder.clearContext();
             }
@@ -68,10 +78,18 @@ public class CloudAccountController {
             if("invalid_grant".equals(rejected.getError().getErrorCode())){
                 clients.removeAuthorizedClient("lookahead",authentication,request,response);
                 var session=request.getSession(false);if(session!=null)session.invalidate();SecurityContextHolder.clearContext();
-                return failure(401,"AUTHENTICATION_REQUIRED");
+                return refused(event,failure(401,"AUTHENTICATION_REQUIRED"),"session expired: Cognito refused the refresh token (invalid_grant)");
             }
-            return failure(503,"SERVICE_UNAVAILABLE");
-        } catch(RuntimeException error){return failure(503,"SERVICE_UNAVAILABLE");}
+            return refused(event,failure(503,"SERVICE_UNAVAILABLE"),"the token refresh did not succeed");
+        } catch(RuntimeException error){return refused(event,failure(503,"SERVICE_UNAVAILABLE"),"Domain did not answer ("+RequestLog.types(error)+")");}
+    }
+    /** One WARN line for an account request the Gateway refused or could not complete: the code and why, never the body. */
+    private static ResponseEntity<?> refused(String event,ResponseEntity<?> answer,String why){
+        int status=answer.getStatusCode().value();
+        String code=answer.getBody() instanceof Map<?,?> body&&body.get("code") instanceof String value?value:"HTTP_"+status;
+        (status>=500?OpsLog.failed(event,code):OpsLog.refused(event,code)).addKeyValue("http.status",status)
+            .log("Account request {} refused: {} ({})",event,code,why);
+        return answer;
     }
     private static ResponseEntity<?> failure(int status,String code){
         String message=code.equals("SIGN_IN_CHALLENGE_REQUIRED")?"Choose an active sign-in to continue.":code.equals("TEST_SESSION")?"Test accounts have no sign-in, profile or password of their own.":status==401?"Sign in again to continue.":"Sign-in service is unavailable. Retry shortly.";

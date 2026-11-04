@@ -24,3 +24,18 @@ app:
   dev-session:
     region: ${AWS_REGION}
     table: ${LOOKAHEAD_DEV_STATE_TABLE}
+# DLV-969 (owner, 2026-11-04): one tidy JSON record per log line in CloudWatch, the same template in Domain and Gateway.
+# A stack trace stays inside its record (cause first, repeated frames folded) instead of one CloudWatch event per line.
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: gateway
+        environment: ${LOOKAHEAD_ENVIRONMENT:dev}
+    json:
+      stacktrace:
+        root: first
+        include-common-frames: false
+        max-length: 20000

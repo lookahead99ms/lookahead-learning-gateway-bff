@@ -8,13 +8,21 @@ import org.springframework.security.oauth2.client.authentication.OAuth2Authentic
 import org.springframework.web.filter.OncePerRequestFilter;
 final class LearnerIdleFilter extends OncePerRequestFilter {
     static final String LAST_ACTIVITY="lookaheadLearnerActivity";
+    static final Duration IDLE=Duration.ofMinutes(30);
     private final Clock clock;
     LearnerIdleFilter(Clock clock){this.clock=clock;}
     @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)throws IOException,ServletException{
         var session=request.getSession(false);
         if(session!=null && SecurityContextHolder.getContext().getAuthentication() instanceof OAuth2AuthenticationToken){
             Instant now=clock.instant();Object last=session.getAttribute(LAST_ACTIVITY);
-            if(!(last instanceof Instant instant)||!now.isBefore(instant.plusSeconds(1800))) DevAdmission.clearLearner(request);
+            if(!(last instanceof Instant instant)||!now.isBefore(instant.plus(IDLE))) {
+                // DLV-969: the learner sign-in ends after 30 idle minutes; the DEV gate admission stays.
+                boolean idle=last instanceof Instant;
+                OpsLog.refused("sign-in.idle-timeout",idle?"IDLE_TIMEOUT":"NO_ACTIVITY_RECORDED")
+                    .log(idle?"Signed out after {} idle minutes: the learner sign-in ended, the DEV gate stays open"
+                        :"Signed out: the session had no activity time (limit {} idle minutes); the learner sign-in ended, the DEV gate stays open",IDLE.toMinutes());
+                DevAdmission.clearLearner(request);
+            }
             else if(activity(request)) session.setAttribute(LAST_ACTIVITY,now);
         }
         chain.doFilter(request,response);

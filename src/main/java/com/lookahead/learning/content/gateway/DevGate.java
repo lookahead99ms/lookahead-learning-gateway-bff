@@ -14,11 +14,20 @@ public interface DevGate {
         return (request, user) -> {
             Instant now = clock.instant(), authTime = user.getIdToken().getAuthenticatedAt();
             if (authTime == null || authTime.isBefore(now.minusSeconds(120)) || authTime.isAfter(now.plusSeconds(30))) {
-                SecurityAuditFilter.record(SecurityAuditFilter.Event.ADMISSION_DENIED); throw new IllegalStateException("Stale sign-in");
+                SecurityAuditFilter.record(SecurityAuditFilter.Event.ADMISSION_DENIED);
+                // DLV-969: why, with the sign-in's age in seconds; never who.
+                String reason = authTime == null ? "MISSING_AUTH_TIME" : authTime.isAfter(now) ? "SIGN_IN_TIME_AHEAD" : "STALE_SIGN_IN";
+                var line = OpsLog.refused("dev-gate.admitted", reason);
+                if (authTime != null) line = line.addKeyValue("signIn.ageSeconds", Duration.between(authTime, now).toSeconds());
+                line.log("DEV gate refused: {} (the gate opens only for a sign-in made in the last 120 s)", reason);
+                throw new IllegalStateException("Stale sign-in");
             }
             String username = user.getClaimAsString("cognito:username");
             DevAdmission.grant(request, username == null ? user.getSubject() : username, user.getSubject(), now);
             SecurityAuditFilter.record(SecurityAuditFilter.Event.ADMISSION_GRANTED);
+            OpsLog.success("dev-gate.admitted").addKeyValue("dev-gate.window", DevAdmission.WINDOW.toString())
+                .log("DEV gate opened for a fresh sign-in: open for {} hours, rechecked every {} minutes",
+                    DevAdmission.WINDOW.toHours(), DevAdmission.RECHECK.toMinutes());
         };
     }
 }

@@ -51,12 +51,60 @@ class LogicalSignInFilterTest {
         var request = new MockHttpServletRequest("GET",path);
         var session = new MockHttpSession(); request.setSession(session);
         var response = new MockHttpServletResponse(); var reached = new AtomicBoolean();
-        filter.doFilter(request,response,(req,res)->reached.set(true));
+        var lines = capture(() -> filter.doFilter(request,response,(req,res)->reached.set(true)));
+        // DLV-969: a failed check is one line saying why; a passed one is silent.
+        if (status == 200) assertThat(lines).isEmpty();
+        else {
+            assertThat(lines).hasSize(1);
+            assertThat(lines.getFirst().getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(lines.getFirst().getFormattedMessage()).isEqualTo(status == 401
+                    ? "Sign-in check failed for GET " + path + ": DOMAIN_SIGN_IN_ENDED, Domain says this sign-in has ended or was revoked; the learner sign-in ends"
+                    : "Sign-in check failed for GET " + path + ": DOMAIN_CHECK_FAILED, Domain answered HTTP " + status + "; answered 503");
+            assertThat(OpsLogTest.pairs(lines.getFirst())).contains("event.action=sign-in.check", "upstream.status=" + status,
+                    "event.outcome=" + (status == 401 ? "refused" : "failure"));
+        }
         assertThat(reached.get()).isEqualTo(status == 200);
         assertThat(session.isInvalid()).isEqualTo(status == 401);
         if(status != 200) assertThat(response.getStatus()).isEqualTo(status == 401 ? 401 : 503);
         assertThat(response.getContentAsString()).doesNotContain("server-only-token");
         server.verify();
+    }
+
+    interface Action { void run() throws Exception; }
+    static java.util.List<ch.qos.logback.classic.spi.ILoggingEvent> capture(Action action) throws Exception {
+        var events = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("lookahead.event");
+        var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>(); appender.start(); events.addAppender(appender);
+        try { action.run(); } finally { events.detachAppender(appender); }
+        for (var line : appender.list) assertThat(line.getFormattedMessage() + OpsLogTest.pairs(line)).doesNotContain("server-only-token", "synthetic-secret");
+        return appender.list;
+    }
+
+    /** DLV-969: an expired refresh, a failed refresh, no stored tokens and an unreachable Domain each say so. */
+    @org.junit.jupiter.api.Test
+    void everyFailedCheckSaysWhy() throws Exception {
+        var settings = new OAuthSettings("http://localhost", "test", "synthetic-secret", "http://identity", "http://domain", "http://localhost");
+        var manager = mock(OAuth2AuthorizedClientManager.class);
+        SecurityContextHolder.getContext().setAuthentication(
+                new OAuth2AuthenticationToken(new DefaultOAuth2User(Set.of(), Map.of("sub", "account"), "sub"), Set.of(), "lookahead"));
+        var expected = new java.util.LinkedHashMap<Object, String>();
+        expected.put(new OAuth2AuthorizationException(new OAuth2Error("invalid_grant", "synthetic-secret", null)),
+                "Sign-in check failed for GET /bff/api/v1/plans: SESSION_EXPIRED, Cognito refused the refresh token (invalid_grant); the learner sign-in ends");
+        expected.put(new OAuth2AuthorizationException(new OAuth2Error("server_error")),
+                "Sign-in check failed for GET /bff/api/v1/plans: TOKEN_REFRESH_FAILED, the token refresh did not succeed; answered 503");
+        expected.put("no client", "Sign-in check failed for GET /bff/api/v1/plans: NO_PROVIDER_TOKENS, this session holds no provider tokens; the learner sign-in ends");
+        expected.put(new IllegalStateException("synthetic-secret"),
+                "Sign-in check failed for GET /bff/api/v1/plans: DOMAIN_UNAVAILABLE, Domain did not answer (IllegalStateException); answered 503");
+        for (var entry : expected.entrySet()) {
+            if (entry.getKey() instanceof RuntimeException failure) when(manager.authorize(any())).thenThrow(failure);
+            else doReturn(null).when(manager).authorize(any());
+            var request = new MockHttpServletRequest("GET", "/bff/api/v1/plans"); request.setSession(new MockHttpSession());
+            var lines = capture(() -> new LogicalSignInFilter(manager, RestClient.builder().build(), settings)
+                    .doFilter(request, new MockHttpServletResponse(), (req, res) -> {}));
+            assertThat(lines).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).containsExactly(entry.getValue());
+            reset(manager);
+            SecurityContextHolder.getContext().setAuthentication(
+                    new OAuth2AuthenticationToken(new DefaultOAuth2User(Set.of(), Map.of("sub", "account"), "sub"), Set.of(), "lookahead"));
+        }
     }
 
     /** DLV-969 S37: a passed check is reused for a minute on API reads, for the same person; writes, CSRF and previews always ask. */

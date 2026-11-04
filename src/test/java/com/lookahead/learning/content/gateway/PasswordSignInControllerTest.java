@@ -333,6 +333,64 @@ class PasswordSignInControllerTest {
         assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage).noneMatch(m -> m.contains(PASSWORD) || m.contains("987654"));
     }
 
+    /** DLV-969 (owner, 2026-11-04): each route's outcome and reason, every limit hit and every Cognito call, never who or what was typed. */
+    @Test void outcomesLimitsAndCognitoCallsAreLoggedWithReasonsButNeverTheAccountOrSecrets() {
+        var loggers = List.of((Logger) LoggerFactory.getLogger("lookahead.event"), (Logger) LoggerFactory.getLogger("lookahead.limit"),
+            (Logger) LoggerFactory.getLogger("lookahead.upstream"));
+        var appender = new ListAppender<ILoggingEvent>(); appender.start(); loggers.forEach(logger -> logger.addAppender(appender));
+        try {
+            answer = m -> InitiateAuthResponse.builder().authenticationResult(tokens()).build();
+            when(handlers.completeSignIn(any(), any(), any())).thenReturn("/learn");
+            controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse());
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage).contains("Password sign-in succeeded: signed in with Cognito, finishing the sign-in");
+            assertThat(appender.list).anyMatch(line -> line.getFormattedMessage().matches("Upstream cognito InitiateAuth succeeded in \\d+ ms"));
+
+            appender.list.clear();
+            answer = m -> { throw NotAuthorizedException.builder().message("Incorrect username or password.").statusCode(400)
+                .awsErrorDetails(software.amazon.awssdk.awscore.exception.AwsErrorDetails.builder().errorCode("NotAuthorizedException").build()).build(); };
+            for (int i = 0; i < PasswordSignInThrottle.PER_ACCOUNT; i++)
+                controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"wrong-" + PASSWORD + "\"}"), new MockHttpServletResponse());
+            var wrong = appender.list.stream().filter(line -> line.getLoggerName().equals("lookahead.event")).findFirst().orElseThrow();
+            assertThat(wrong.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(wrong.getFormattedMessage()).isEqualTo("Password sign-in refused: INVALID_CREDENTIALS (wrong email or password)");
+            assertThat(OpsLogTest.pairs(wrong)).contains("event.action=sign-in.password", "event.outcome=refused", "reason=INVALID_CREDENTIALS", "http.status=401");
+            assertThat(appender.list).anyMatch(line -> OpsLogTest.pairs(line).contains("upstream.code=NotAuthorizedException"));
+            // The eleventh attempt for the account: our own limit, named, sized and windowed.
+            appender.list.clear();
+            controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"wrong\"}"), new MockHttpServletResponse());
+            var limit = appender.list.stream().filter(line -> line.getLoggerName().equals("lookahead.limit")).findFirst().orElseThrow();
+            assertThat(limit.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(limit.getFormattedMessage()).isEqualTo("Rate limit reached: sign-in.password refused, more than 10 password-page attempts for one account in 10 minutes");
+            assertThat(OpsLogTest.pairs(limit)).contains("limit.name=password-pages.per-account", "limit.max=10", "limit.window=PT10M", "event.action=sign-in.password");
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage).contains("Password sign-in refused: TOO_MANY_REQUESTS (too many attempts)");
+            // One address spraying accounts trips the per-address limit.
+            var sprayed = controller();
+            appender.list.clear();
+            for (int i = 0; i <= PasswordSignInThrottle.PER_ADDRESS; i++)
+                sprayed.forgot(post("{\"email\":\"user" + i + "@example.invalid\"}"));
+            assertThat(appender.list).anyMatch(line -> OpsLogTest.pairs(line).contains("limit.name=password-pages.per-address") && OpsLogTest.pairs(line).contains("limit.max=30"));
+            // Cognito's own throttling is a limit hit too.
+            appender.list.clear();
+            answer = m -> { throw TooManyRequestsException.builder().statusCode(400)
+                .awsErrorDetails(software.amazon.awssdk.awscore.exception.AwsErrorDetails.builder().errorCode("TooManyRequestsException").build()).build(); };
+            controller().signUp(post("{\"firstName\":\"Arjun\",\"lastName\":\"Rao\",\"email\":\"arjun@example.invalid\",\"password\":\"" + PASSWORD + "\"}"));
+            assertThat(appender.list).anyMatch(line -> line.getLoggerName().equals("lookahead.limit") && OpsLogTest.pairs(line).contains("limit.name=cognito")
+                && line.getFormattedMessage().equals("Rate limit reached: sign-up.started refused by Cognito (TooManyRequestsException)"));
+            // A failure with no answer names its types, not its message.
+            appender.list.clear();
+            answer = m -> { throw new IllegalStateException("synthetic transport failure for arjun@example.invalid"); };
+            controller().resend(post("{\"email\":\"arjun@example.invalid\"}"));
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                .contains("Sign-up code resend failed: SERVICE_UNAVAILABLE (Cognito or the sign-in completion was unavailable or answered unexpectedly) after IllegalStateException");
+            controller().confirm(post("not json"));
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage).contains("Sign-up code confirmation refused: INVALID_REQUEST (the form was malformed or a field failed validation)");
+        } finally { loggers.forEach(logger -> logger.detachAppender(appender)); }
+        assertThat(appender.list).isNotEmpty().allSatisfy(line -> {
+            assertThat(line.getFormattedMessage()).doesNotContain("example.invalid", PASSWORD, "synthetic-access", "synthetic-id", "203.0.113.9");
+            assertThat(OpsLogTest.pairs(line)).noneMatch(pair -> pair.contains("example.invalid") || pair.contains(PASSWORD) || pair.contains("203.0.113.9"));
+        });
+    }
+
     @Test void clientAddressUsesTheLastForwardedHop() {
         var request = new MockHttpServletRequest(); request.setRemoteAddr("10.0.0.5");
         assertThat(PasswordSignInController.address(request)).isEqualTo("10.0.0.5");

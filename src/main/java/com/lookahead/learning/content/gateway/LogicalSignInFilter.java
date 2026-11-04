@@ -56,6 +56,9 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
                 chain.doFilter(request, response);
                 return;
             }
+            OpsLog.refused("sign-in.check", "SIGN_IN_CHALLENGE_REQUIRED").addKeyValue("url.path", RequestLog.path(request))
+                    .log("Sign-in check refused {} {}: SIGN_IN_CHALLENGE_REQUIRED, the person must first choose which active sign-in to end",
+                            RequestLog.method(request), RequestLog.path(request));
             response.setStatus(401);
             response.setHeader("Cache-Control", "no-store");
             response.setContentType("application/json");
@@ -76,6 +79,10 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
             return;
         }
         int status;
+        // DLV-969: why a check did not pass, as a stable code and in words, for the log line.
+        String reason, why;
+        String types = null;
+        Integer domain = null;
         try {
             var client = clients.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead")
                     .principal(authentication).attributes(attributes -> {
@@ -85,16 +92,28 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
             status = client == null ? 401 : http.get().uri(settings.domainApiUpstream() + "/api/v1/auth/me")
                     .headers(headers -> {headers.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,headers);})
                     .exchange((sent, received) -> received.getStatusCode().value());
+            if (client == null) { reason = "NO_PROVIDER_TOKENS"; why = "this session holds no provider tokens"; }
+            else { domain = status; reason = status == 401 ? "DOMAIN_SIGN_IN_ENDED" : "DOMAIN_CHECK_FAILED";
+                why = status == 401 ? "Domain says this sign-in has ended or was revoked" : "Domain answered HTTP " + status; }
         } catch (OAuth2AuthorizationException rejected) {
             status = "invalid_grant".equals(rejected.getError().getErrorCode()) ? 401 : 503;
+            reason = status == 401 ? "SESSION_EXPIRED" : "TOKEN_REFRESH_FAILED";
+            why = status == 401 ? "Cognito refused the refresh token (invalid_grant)" : "the token refresh did not succeed";
         } catch (RuntimeException unavailable) {
             status = 503;
+            reason = "DOMAIN_UNAVAILABLE"; types = RequestLog.types(unavailable); why = "Domain did not answer (" + types + ")";
         }
         if (status == 200) {
             if (api) session.setAttribute(CHECKED, new Checked(authentication.getName(), clock.instant()));
             chain.doFilter(request, response);
             return;
         }
+        var line = (status == 401 ? OpsLog.refused("sign-in.check", reason) : OpsLog.failed("sign-in.check", reason))
+                .addKeyValue("http.method", RequestLog.method(request)).addKeyValue("url.path", RequestLog.path(request));
+        if (domain != null) line = line.addKeyValue("upstream.status", domain);
+        if (types != null) line = line.addKeyValue("exception.types", types);
+        line.log(status == 401 ? "Sign-in check failed for {} {}: {}, {}; the learner sign-in ends" : "Sign-in check failed for {} {}: {}, {}; answered 503",
+                RequestLog.method(request), RequestLog.path(request), reason, why);
         if (status == 401) {
             DevAdmission.clearLearner(request);
         }
