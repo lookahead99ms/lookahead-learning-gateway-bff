@@ -86,7 +86,8 @@ class FakeAws:
                     self.stack['status'] = self.settleStatus
                 self.busyPolls -= 1
             return {'Stacks': [{'StackStatus': self.stack['status'], 'StackId': 'id-' + opts['--stack-name'],
-                                'Parameters': [{'ParameterKey': k, 'ParameterValue': v} for k, v in self.stack['parameters'].items()]}]}
+                                'Parameters': [{'ParameterKey': k, 'ParameterValue': v} for k, v in self.stack['parameters'].items()],
+                                'Tags': [{'Key': k, 'Value': v} for k, v in self.stack.get('tags', {}).items()]}]}
         if key == 'servicediscovery list-instances':
             assert opts['--service-id'] == self.config['discovery']['serviceId'], opts
             return {'Instances': [{'Id': 'i'}] * self.discovered}
@@ -450,12 +451,19 @@ class ExecuteTests(DeployFixture):
         self.assertEqual(['identity', 'change-set', 'executed', 'verified', 'observed'], [s['step'] for s in outcome['steps']])
         create = self.aws.ops('cloudformation', 'create-change-set')[0]
         self.assertEqual(('CREATE', 'app-12'), (create[create.index('--change-set-type') + 1], create[create.index('--change-set-name') + 1]))
-        # The stack says what it serves (user 2026-11-05): release tag, deploy run and source commit, next to the environment tag.
-        self.assertEqual({'LookAheadEnvironment': 'dev', 'ReleaseVersion': planned['releaseVersion'], 'DeployRun': self.run, 'SourceSha': planned['sourceSha']}, self.aws.tags)
+        # A new stack gets the environment tag only; an existing stack keeps its tags exactly (a tag change needs ecs:UntagResource on
+        # the provisioning role, which Domain run 42110285052 showed it lacks).
+        self.assertEqual({'LookAheadEnvironment': 'dev'}, self.aws.tags)
         self.assertEqual(self.aws.stack['parameters']['ApplicationImage'], planned['image'])
         self.assertEqual(1, len(self.aws.ops('servicediscovery', 'list-instances')))
         self.assertEqual([], self.aws.ops('elbv2', 'describe-target-health'))
         self.assertEqual(15, outcome['steps'][-1]['minutes'])
+        self.aws.stack['tags'] = {'LookAheadEnvironment': 'dev', 'ReleaseVersion': 'v2026.11.05.19.00', 'DeployRun': '42106678466', 'SourceSha': 'd' * 40}
+        self.aws.image = 'sha256:' + 'c' * 64
+        kept = self.planned()
+        self.assertEqual(self.aws.stack['tags'], kept['stackTags'])
+        self.deployer(kept).run()
+        self.assertEqual({'LookAheadEnvironment': 'dev', 'ReleaseVersion': 'v2026.11.05.19.00', 'DeployRun': '42106678466', 'SourceSha': 'd' * 40}, self.aws.tags)
 
     def test_rolling_update_replaces_the_task_definition_and_keeps_the_service(self):
         self.aws.serving('old')
