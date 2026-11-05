@@ -203,7 +203,8 @@ def stackState(call, name):
         return None
     stack = found['Stacks'][0]
     return {'status': stack.get('StackStatus'), 'stackId': stack.get('StackId'),
-            'parameters': {row['ParameterKey']: row.get('ParameterValue') for row in stack.get('Parameters', [])}}
+            'parameters': {row['ParameterKey']: row.get('ParameterValue') for row in stack.get('Parameters', [])},
+            'tags': {row['Key']: row.get('Value') for row in stack.get('Tags', [])}}
 
 
 def parameters(config, image, count, refresh='none'):
@@ -285,6 +286,10 @@ def plan(env, call, root, get=owner.api, now=None, stage=None, session=1, recove
               'currentImage': current.get('ApplicationImage'), 'currentDesiredCount': current.get('DesiredCount'),
               'observationMinutes': config['observationMinutes'], 'refreshObservationMinutes': config['refreshObservationMinutes'], 'probeUrl': config['probeUrl'],
               'probeRequired': config['probeRequired'],
+              # The stack's tags are kept exactly as they are: CloudFormation copies them onto the ECS service, and changing one needs
+              # ecs:TagResource and ecs:UntagResource for the provisioning role, which it lacks (Domain run 42110285052 failed on
+              # UntagResource, 2026-11-05). Per-deploy tags (release, run, commit) return once an IAM transition grants them.
+              'stackTags': dict(state['tags']) if exists and state.get('tags') else {'LookAheadEnvironment': 'dev'},
               'templateSha256': hashlib.sha256(templateText.encode()).hexdigest(),
               'configSha256': hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest(),
               'busyStackPark': busy and count == 0, 'busyStackStatus': state['status'] if busy and count == 0 else None,
@@ -522,11 +527,9 @@ class Deployer:
         return changes
 
     def stackTags(self):
-        """The stack says what it serves (user 2026-11-05): the release tag, the run that put it there and the source commit, readable
-        with describe-stacks and by the Infra status switch; the environment tag stays."""
-        p = self.plan
-        return [{'Key': 'LookAheadEnvironment', 'Value': 'dev'}, {'Key': 'ReleaseVersion', 'Value': p['releaseVersion']},
-                {'Key': 'DeployRun', 'Value': p['runId']}, {'Key': 'SourceSha', 'Value': p['sourceSha']}]
+        """Exactly the tags the stack had at plan time (the environment tag for a new stack): a tag change is an ECS tag update the
+        provisioning role may not make yet (see plan)."""
+        return [{'Key': key, 'Value': value} for key, value in self.plan['stackTags'].items()]
 
     def describeChangeSet(self):
         described = self.call('cloudformation', 'describe-change-set', '--stack-name', self.plan['stack'], '--change-set-name', self.plan['changeSet'])

@@ -90,8 +90,9 @@ scheduled scale-down from 2026-11-05). `01 · Full` always passes `1`.
 4. **Deploy to DEV** (`deploy-dev`, environment `dev`): `deploy.py verify` rechecks the approval,
    the plan digest, the template and the configuration before OIDC; the deploy session
    `<app>-deploy-<run>-1` (60 minutes) runs `deploy.py execute`: one change set `app-<run>`
-   (CREATE for the first stack, UPDATE afterwards, tagged `ReleaseVersion`, `DeployRun` and `SourceSha` so the stack
-   itself says what it serves; its preview must show only the task definition
+   (CREATE for the first stack, UPDATE afterwards, with the stack's tags kept exactly as they are: CloudFormation copies
+   them onto the ECS service and changing one needs `ecs:TagResource`/`ecs:UntagResource` on the provisioning role, which
+   an IAM transition has yet to grant, Domain run 42110285052; its preview must show only the task definition
    and the service), execution, then for `desired_count` 1 the ECS rollout `COMPLETED` with exactly
    one `HEALTHY` task whose container reports the approved image digest (`describe-tasks`; the deploy
    session is denied `DescribeTaskDefinition` by the Infra bundle and does not need it), a clean log window, service discovery listing
