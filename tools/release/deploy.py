@@ -472,7 +472,7 @@ class Deployer:
         self.stackSeconds, self.observeRounds = stackSeconds, observeRounds
         # `05 · Recover DEV` passes False: a recovery ends serving, whatever the hour.
         self.parkOffHours, self.wasStopped = parkOffHours, False
-        self.task = self.logStart = None
+        self.task = self.logStart = self.revision = None
         self.steps = []
 
     def note(self, step, **detail):
@@ -548,6 +548,22 @@ class Deployer:
         p, cfg = self.plan, self.config
         counts = self.waitFor('ECS rollout of ' + p['stack'],
                               lambda: (lambda c: c if c and c['rolloutState'] == 'COMPLETED' and c['running'] == 1 and c['desired'] == 1 else None)(serviceCounts(self.call, cfg)), 300)
+        self.revision = counts['taskDefinition']
+        self.acceptTask()
+        registered = None
+        if cfg['discovery'] is not None:
+            registered = len(self.call('servicediscovery', 'list-instances', '--service-id', cfg['discovery']['serviceId']).get('Instances', []))
+            require(registered >= 1, 'Service discovery lists no ' + cfg['discovery']['serviceName'] + ' instance')
+        targets = None
+        if cfg['targetGroupArn'] is not None:
+            targets = self.waitFor('target health', lambda: (lambda rows: rows if rows and all(r['TargetHealth']['State'] == 'healthy' for r in rows) else None)(
+                self.call('elbv2', 'describe-target-health', '--target-group-arn', cfg['targetGroupArn']).get('TargetHealthDescriptions', [])), 180)
+        self.note('verified', task=self.task, counts=counts, discovered=registered, targets=None if targets is None else len(targets))
+
+    def acceptTask(self):
+        """The service's one RUNNING task: HEALTHY, this family, the approved image, a clean log since it started. It is the task the
+        observation then holds the service to."""
+        p, cfg = self.plan, self.config
         arns = self.call('ecs', 'list-tasks', '--cluster', cfg['cluster'], '--service-name', p['stack'], '--desired-status', 'RUNNING').get('taskArns', [])
         require(len(arns) == 1, 'Exactly one running task expected')
         task = self.waitFor('task health', lambda: (lambda t: t if t.get('healthStatus') == 'HEALTHY' else None)(
@@ -562,15 +578,26 @@ class Deployer:
         startedAt = owner.timestamp(task['startedAt']) if task.get('startedAt') else self.now() - timedelta(minutes=10)
         self.task, self.logStart = arns[0], int(startedAt.timestamp() * 1000)
         self.requireCleanLog()
-        registered = None
-        if cfg['discovery'] is not None:
-            registered = len(self.call('servicediscovery', 'list-instances', '--service-id', cfg['discovery']['serviceId']).get('Instances', []))
-            require(registered >= 1, 'Service discovery lists no ' + cfg['discovery']['serviceName'] + ' instance')
-        targets = None
-        if cfg['targetGroupArn'] is not None:
-            targets = self.waitFor('target health', lambda: (lambda rows: rows if rows and all(r['TargetHealth']['State'] == 'healthy' for r in rows) else None)(
-                self.call('elbv2', 'describe-target-health', '--target-group-arn', cfg['targetGroupArn']).get('TargetHealthDescriptions', [])), 180)
-        self.note('verified', task=arns[0], counts=counts, discovered=registered, targets=None if targets is None else len(targets))
+        return task
+
+    def settleRestart(self, minute):
+        """A new rollout of the verified revision during the watch (the content release's Domain restart, or a manual refresh; user
+        2026-11-05, Domain run 42106678466): wait for it, accept its task as the one to hold the service to, and carry on. A rollout
+        of another revision is another deploy and still fails."""
+        p, cfg = self.plan, self.config
+        self.log('observation ' + str(minute + 1) + ': a restart of the verified revision is rolling out; waiting for it to settle', flush=True)
+
+        def settled():
+            counts = serviceCounts(self.call, cfg)
+            require(counts and counts['desired'] == 1 and counts['taskDefinition'] == self.revision,
+                    'Another deployment replaced the verified revision during observation')
+            return counts if counts['running'] == 1 and counts['rolloutState'] == 'COMPLETED' else None
+        counts = self.waitFor('restart of ' + p['stack'], settled, 300)
+        previous = self.task
+        self.acceptTask()
+        self.note('restarted-during-observation', minute=minute + 1, by='a restart of the verified revision (the content release or a manual refresh)',
+                  previousTask=previous, task=self.task)
+        return counts
 
     def scaleToZero(self):
         """Busy-stack park: DesiredCount 0 on exactly the configured service, outside the stuck stack update."""
@@ -653,6 +680,11 @@ class Deployer:
                 self.note('stopped-during-observation', minutes=minute, by='the start/stop switch or the scheduled stop',
                           note='the verified revision served ' + str(minute) + ' clean minute(s); the next start serves it again')
                 return
+            if counts and counts['desired'] == 1 and counts['rolloutState'] == 'IN_PROGRESS':
+                # A new PRIMARY deployment while the desired count is 1: a restart of this revision is waited for; another revision is
+                # another deploy. A crash never starts a deployment (the rollout state stays COMPLETED while ECS replaces the task).
+                require(counts['taskDefinition'] == self.revision, 'Another deployment replaced the verified revision during observation')
+                counts = self.settleRestart(minute)
             require(counts and counts['running'] == 1 and counts['rolloutState'] == 'COMPLETED', 'Service stopped serving during observation')
             self.requireSameHealthyTask()
             if required:

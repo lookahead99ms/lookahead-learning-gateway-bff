@@ -116,7 +116,11 @@ scheduled scale-down from 2026-11-05). `01 · Full` always passes `1`.
    decision 2026-11-05), and a merge-driven `01 · Full` that reaches its deploy in the window simply ends there with
    the image published. If the start/stop switch or the scheduled stop sets the desired count
    to 0 during the observation, the run records `stopped-during-observation` with the clean minutes and ends
-   successfully: a crash never changes the desired count, so 0 is always an intentional stop. Each recorded step and each observation round prints one line to
+   successfully: a crash never changes the desired count, so 0 is always an intentional stop. A new rollout of the
+   verified revision during the watch (the content release's "restart Domain" step, or a manual refresh; user
+   2026-11-05, Domain run 42106678466) is waited for (at most 300 s), its new task is verified like the first one and
+   recorded as `restarted-during-observation`, and the watch carries on with that task; a rollout of another revision
+   is another deploy and still fails the run. Each recorded step and each observation round prints one line to
    the job log, so the long waits are visible. For `desired_count` 0 it waits until the service runs zero
    tasks. A stack that ends in a rollback state fails the run; the previous revision keeps serving.
    The result is retained whatever happened (`deploy-result`) and the approval issue is closed with
