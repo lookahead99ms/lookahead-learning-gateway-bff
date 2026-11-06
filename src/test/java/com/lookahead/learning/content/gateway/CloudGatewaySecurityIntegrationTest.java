@@ -198,6 +198,51 @@ class CloudGatewaySecurityIntegrationTest {
         var user=new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_USER")),token);
         return new org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken(user,user.getAuthorities(),"lookahead");
     }
+    @Test void waitingAccountCarriesItsFirstNameToTheWelcomePageInACookie()throws Exception {
+        // DLV-971: the sign-in ends, no session survives, so the first name rides in a short-lived cookie, not in the URL.
+        var now=Instant.now();
+        var claims=new java.util.HashMap<String,Object>(java.util.Map.of("sub","010b25a0-c0f1-709c-467f-06e036639814","cognito:username","mohiddin@lookahead.dev","given_name","Mohiddin","family_name","Shaik","auth_time",now.minusSeconds(3)));
+        var token=new org.springframework.security.oauth2.core.oidc.OidcIdToken("synthetic-id-token",now.minusSeconds(5),now.plusSeconds(3600),claims);
+        var user=new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_USER")),token);
+        var auth=new org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken(user,user.getAuthorities(),"lookahead");
+        var session=new MockHttpSession(context.getServletContext());
+        var request=new MockHttpServletRequest();request.setSession(session);var response=new MockHttpServletResponse();
+        clients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),auth.getName(),
+            new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,"synthetic-access",now,now.plusSeconds(300))),auth,request,response);
+        var gated=new GatewaySecurityHandlers(settings,clients,http,java.util.Optional.of(DevGate.freshSignIn(java.time.Clock.systemUTC())));
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"ACCOUNT_ADMISSION_REQUIRED\",\"message\":\"Sign in again or contact the account administrator.\"}"));
+        gated.loginSucceeded(request,response,auth);
+        assertThat(response.getRedirectedUrl()).isEqualTo(settings.frontend()+"/welcome?access=pending");
+        assertThat(request.getSession(false)).isNull();
+        var cookie=response.getHeader("Set-Cookie");
+        assertThat(cookie).startsWith("lookahead-welcome=Mohiddin;").contains("Path=/").contains("Max-Age=900").contains("SameSite=Strict").doesNotContain("HttpOnly");
+        fixture.server.verify();
+        // Any other refusal sets no cookie.
+        fixture.server.reset();
+        var other=new MockHttpServletRequest();other.setSession(new MockHttpSession(context.getServletContext()));var otherResponse=new MockHttpServletResponse();
+        clients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),auth.getName(),
+            new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,"synthetic-access",now,now.plusSeconds(300))),auth,other,otherResponse);
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/internal/v1/cloud-sign-ins/admit")).andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"status\":403,\"code\":\"RECENT_AUTHENTICATION_REQUIRED\"}"));
+        gated.loginSucceeded(other,otherResponse,auth);
+        assertThat(otherResponse.getHeader("Set-Cookie")).isNull();fixture.server.verify();
+    }
+    @Test void firstNameComesFromTheClaimsAndIsLettersOnly() {
+        java.util.function.Function<java.util.Map<String,Object>,org.springframework.security.core.Authentication> signIn=extra->{
+            var claims=new java.util.HashMap<String,Object>(java.util.Map.of("sub","s"));claims.putAll(extra);
+            var token=new org.springframework.security.oauth2.core.oidc.OidcIdToken("t",Instant.now().minusSeconds(5),Instant.now().plusSeconds(60),claims);
+            var user=new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_USER")),token);
+            return new org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken(user,user.getAuthorities(),"lookahead");};
+        assertThat(GatewaySecurityHandlers.firstName(signIn.apply(java.util.Map.of("given_name","Mohiddin","name","Mohiddin Shaik")))).isEqualTo("Mohiddin");
+        assertThat(GatewaySecurityHandlers.firstName(signIn.apply(java.util.Map.of("name","Shree  Ram")))).isEqualTo("Shree");
+        assertThat(GatewaySecurityHandlers.firstName(signIn.apply(java.util.Map.of("given_name"," Zoë-Anne ")))).isEqualTo("Zoë-Anne");
+        assertThat(GatewaySecurityHandlers.firstName(signIn.apply(java.util.Map.of("given_name","R2D2")))).isNull();
+        assertThat(GatewaySecurityHandlers.firstName(signIn.apply(java.util.Map.of("given_name","a".repeat(41))))).isNull();
+        assertThat(GatewaySecurityHandlers.firstName(signIn.apply(java.util.Map.of("given_name","<b>x</b>")))).isNull();
+        assertThat(GatewaySecurityHandlers.firstName(signIn.apply(java.util.Map.of()))).isNull();
+        assertThat(GatewaySecurityHandlers.firstName(null)).isNull();
+    }
     @Test void devGateOpensBeforeDomainIsAskedAndTheGrantSurvivesTheSignIn()throws Exception {
         // DLV-969: with the lower-cost-dev gate present a fresh Look Ahead sign-in opens DEV first; Domain then admits the account.
         var order=new java.util.ArrayList<String>();var now=Instant.now();var auth=oidcSignIn(now,now.minusSeconds(3));

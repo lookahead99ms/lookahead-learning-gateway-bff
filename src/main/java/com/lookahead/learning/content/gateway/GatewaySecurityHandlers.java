@@ -7,7 +7,12 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Optional;
 
 /** Browser redirects and JSON failure contracts; no token values reach the browser. */
@@ -23,6 +28,29 @@ public class GatewaySecurityHandlers {
 
     /** Domain answered 403 ACCOUNT_ADMISSION_REQUIRED: the sign-in worked, the account waits for the owner (DLV-969). */
     static final class AdmissionPending extends IllegalStateException { AdmissionPending(){super("Account admission pending");} }
+
+    /**
+     * DLV-971 (owner, 2026-11-06): the Welcome page greets a waiting person by first name. The learner sign-in ends here
+     * and no session survives, so the name travels in a short-lived cookie the Welcome page reads once and clears; never
+     * in the redirect's URL. Not HttpOnly on purpose (the page reads it); SameSite=Strict, 15 minutes, nothing else in it.
+     */
+    static final String WELCOME_COOKIE = "lookahead-welcome";
+    static final Duration WELCOME_COOKIE_AGE = Duration.ofMinutes(15);
+    /** The first name from the provider's claims: given_name, else the first word of name; letters only, at most 40. */
+    static String firstName(Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof OidcUser user)) return null;
+        String given = user.getGivenName();
+        String full = user.getFullName();
+        String candidate = given != null && !given.isBlank() ? given.strip() : full == null ? "" : full.strip().split("\\s+")[0];
+        return candidate.isEmpty() || candidate.length() > 40 || !candidate.matches("[\\p{L}\\p{M}'\\u2019.-]+") ? null : candidate;
+    }
+    static void welcomeName(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
+        String first = firstName(authentication);
+        if (first == null) return;
+        var cookie = ResponseCookie.from(WELCOME_COOKIE, URLEncoder.encode(first, StandardCharsets.UTF_8)).path("/")
+            .maxAge(WELCOME_COOKIE_AGE).sameSite("Strict").secure(request.isSecure()).httpOnly(false).build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
 
     void authenticationRequired(HttpServletRequest request, HttpServletResponse response,
                                 AuthenticationException error) throws IOException {
@@ -163,6 +191,7 @@ public class GatewaySecurityHandlers {
                     .log("Sign-in failed ({} via {}): Domain did not answer the admission check ({})",provider,via,RequestLog.types(rejected));
                 else line.log("Sign-in refused ({} via {}): {}",provider,via,reason);
                 clients.removeAuthorizedClient("lookahead",authentication,request,response);
+                if(pending)welcomeName(request,response,authentication);
                 if(gate.isPresent()) {
                     // A waiting account never rides on a gate opened by an earlier sign-in in this browser.
                     Object kept=pending?null:previousGate;
