@@ -42,7 +42,7 @@ dependencies {
         exclude group: 'software.amazon.awssdk', module: 'apache5-client'
     }
     implementation 'software.amazon.awssdk:url-connection-client:2.55.12'
-    implementation('software.amazon.awssdk:dynamodb:2.55.12') {
+    implementation('software.amazon.awssdk:dynamodb:2.57.8') {
         exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
         exclude group: 'software.amazon.awssdk', module: 'apache-client'
     }
