@@ -42,6 +42,23 @@ SHA-256 checksum. CI additionally checks `gradle-wrapper.jar` against the
 [official Gradle 9.6.1 checksum](https://downloads.gradle.org/distributions/gradle-9.6.1-wrapper.jar.sha256).
 When upgrading Gradle, regenerate the Wrapper and update both reviewed checksums.
 
+## Contracts with other repositories
+
+No repository clones another at build or deploy time (owner decision, 2026-11-05). Every
+expectation this repository has of another is a committed contract file: the producer owns it,
+each side keeps its own copy, and each side tests its copy on its own pull request. Contracts
+are public by nature; anything that would need to stay private is not a contract but
+configuration, and it belongs to Infra.
+
+| Contract file | Owner | Checked on this repo's PR by | Checked by the other side | Change order | What a failure means |
+| --- | --- | --- | --- | --- | --- |
+| `src/test/resources/contracts/domain-api-v1.json` (`gateway-domain-contract/v1`: every Domain call this Gateway makes, its method, path, success statuses and the response fields the Gateway reads) | Domain, the provider | `DomainContractTest`: the entries are well formed and unique, each proxied example is driven through `GatewayController.proxy` against a mock Domain and relays the listed status, the cloud sign-in actions match the call sites, and every Domain path literal in `src/main/java` is listed | Content's registry check (`docs/contracts/registry.json`) compares every copy with the master on Content pull requests; this repo keeps its copy and tests it locally | Domain first (route, status or field), then Gateway, then Web | A Gateway call is not in the contract, or a listed example is not relayed as listed: this repository is behind its own calls. The copies differ: a contract change merged on one side has not reached the other; update the copy that is behind |
+
+Today the contract file's own header and `DomainContractTest` describe it as this Gateway's
+consumer-driven list (consumer Gateway, provider Domain); the owner decision makes the
+producer its owner, and the change order above follows that decision. Content is the single
+registry of all copies; no workflow of this repository reads another repository.
+
 ## Standalone local smoke run
 
 Tests use synthetic data and temporary loopback servers; they do not require a
