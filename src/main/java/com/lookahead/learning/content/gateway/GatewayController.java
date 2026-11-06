@@ -141,11 +141,17 @@ public class GatewayController {
                 && (!"POST".equals(request.getMethod()) || request.getQueryString() == null);
         boolean platformReview = platformReviewRoute(request.getMethod(), upstreamPath)
                 && ("GET".equals(request.getMethod()) || request.getQueryString() == null);
-        // PUT exists only for platform reviews; every other route keeps its earlier methods.
-        if("PUT".equals(request.getMethod()) && !platformReview)return ResponseEntity.status(405).header(HttpHeaders.CACHE_CONTROL,"no-store").build();
-        if(!content && !account && !execution && !authorReview && !platformReview && !staffAccess && !membership && !directory)return ResponseEntity.notFound().build();
+        // DLV-971: the delivery plan follows the platform-review rules (query string on GET only).
+        boolean delivery = deliveryRoute(request.getMethod(), upstreamPath)
+                && ("GET".equals(request.getMethod()) || request.getQueryString() == null);
+        // PUT exists only for platform reviews and delivery work items; every other route keeps its earlier methods.
+        if("PUT".equals(request.getMethod()) && !platformReview && !delivery)return ResponseEntity.status(405).header(HttpHeaders.CACHE_CONTROL,"no-store").build();
+        if(!content && !account && !execution && !authorReview && !platformReview && !delivery && !staffAccess && !membership && !directory)return ResponseEntity.notFound().build();
         boolean testSession=settings.cloud() && TestSessionController.active(authentication);
-        if ((directory || authorReview || platformReview || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken) && !testSession) return ResponseEntity.status(401).build();
+        // DLV-971: the delivery plan, and promoting a review onto it, are staff work. A test account is a learner, so a test
+        // session is refused as Previews/Architecture refuse it (AuthorPreviewController): HTTP 401, empty body, Domain not asked.
+        if ((delivery || promoteRoute(request.getMethod(), upstreamPath)) && testSession) return AuthorPreviewProxy.empty(401);
+        if ((directory || authorReview || platformReview || delivery || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken) && !testSession) return ResponseEntity.status(401).build();
         int bodyLimit = (authorReview || staffAccess) ? 16 * 1024 : execution ? 512 * 1024 : platformReview ? PLATFORM_REVIEW_BODY_BYTES : 8 * 1024 * 1024;
         byte[] body=request.getInputStream().readNBytes(bodyLimit + 1);
         if(body.length>bodyLimit)return ResponseEntity.status(413).build();
@@ -184,14 +190,30 @@ public class GatewayController {
     }
 
     private static final String PLATFORM_REVIEW_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    private static final String PLATFORM_REVIEWS = "/api/v1/platform-reviews", PLATFORM_REVIEW = PLATFORM_REVIEWS + "/" + PLATFORM_REVIEW_ID;
     static boolean platformReviewRoute(String method, String path) {
-        String root = "/api/v1/platform-reviews", item = root + "/" + PLATFORM_REVIEW_ID;
+        String root = PLATFORM_REVIEWS, item = PLATFORM_REVIEW;
         return switch (method) {
             case "GET" -> path.equals(root) || path.equals(root + "/me") || path.matches(item)
                     || path.matches(item + "/attachments/" + PLATFORM_REVIEW_ID);
-            case "POST" -> path.equals(root);
+            case "POST" -> path.equals(root) || promoteRoute(method, path);
             case "PUT" -> path.matches(item) || path.matches(item + "/triage");
             case "DELETE" -> path.matches(item);
+            default -> false;
+        };
+    }
+    /** DLV-971: promoting a platform review onto the delivery plan; one of the platform-review routes, staff sign-ins only. */
+    static boolean promoteRoute(String method, String path) {
+        return "POST".equals(method) && path.matches(PLATFORM_REVIEW + "/promote");
+    }
+
+    /** DLV-971: the delivery plan. A work item id is a letter or digit followed by up to 79 letters, digits, dots, underscores or hyphens. */
+    private static final String DELIVERY_PLAN = "/api/v1/delivery/plan", WORK_ITEM = DELIVERY_PLAN + "/work-items/[A-Za-z0-9][A-Za-z0-9._-]{0,79}";
+    static boolean deliveryRoute(String method, String path) {
+        return switch (method) {
+            case "GET" -> path.equals(DELIVERY_PLAN);
+            case "POST" -> path.equals(DELIVERY_PLAN + "/work-items") || path.matches(WORK_ITEM + "/resolve-conflict");
+            case "PUT" -> path.matches(WORK_ITEM);
             default -> false;
         };
     }

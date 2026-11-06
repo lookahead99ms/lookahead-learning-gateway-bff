@@ -40,6 +40,17 @@ class PlatformReviewGatewayTest {
         for (String path : new String[]{root, root + "/me", root + "/" + id, root + "/" + id + "/attachments/" + id})
             assertThat(GatewayController.platformReviewRoute("GET", path)).isTrue();
         assertThat(GatewayController.platformReviewRoute("POST", root)).isTrue();
+        // DLV-971: promoting a review onto the delivery plan is a POST on the exact lowercase-UUID item.
+        assertThat(GatewayController.platformReviewRoute("POST", root + "/" + id + "/promote")).isTrue();
+        assertThat(GatewayController.promoteRoute("POST", root + "/" + id + "/promote")).isTrue();
+        for (String path : new String[]{root + "/" + id.toUpperCase() + "/promote", root + "/promote", root + "/" + id + "/promote/", root + "/" + id + "/promoted"}) {
+            assertThat(GatewayController.platformReviewRoute("POST", path)).as(path).isFalse();
+            assertThat(GatewayController.promoteRoute("POST", path)).as(path).isFalse();
+        }
+        for (String method : new String[]{"GET", "PUT", "DELETE"}) {
+            assertThat(GatewayController.platformReviewRoute(method, root + "/" + id + "/promote")).as(method).isFalse();
+            assertThat(GatewayController.promoteRoute(method, root + "/" + id + "/promote")).as(method).isFalse();
+        }
         assertThat(GatewayController.platformReviewRoute("PUT", root + "/" + id)).isTrue();
         assertThat(GatewayController.platformReviewRoute("PUT", root + "/" + id + "/triage")).isTrue();
         assertThat(GatewayController.platformReviewRoute("DELETE", root + "/" + id)).isTrue();

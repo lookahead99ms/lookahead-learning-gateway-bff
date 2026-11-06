@@ -267,6 +267,61 @@ class TestSessionIntegrationTest {
         mvc.perform(get("/bff/api/v1/auth/test-session").session(gone)).andExpect(status().isOk()).andExpect(jsonPath("data.active").value(false));
     }
 
+    /**
+     * DLV-971: the delivery plan and promoting a review onto it are staff work. A test account is a learner: a test session is
+     * refused as Previews/Architecture refuse it (HTTP 401, empty body) and the Domain is never asked; Back to my account
+     * restores the staff sign-in, whose calls are forwarded with its bearer token.
+     */
+    @Test void aTestSessionNeverReachesTheDeliveryPlanWhileTheStaffSignInIsForwarded()throws Exception {
+        String review="/bff/api/v1/platform-reviews/6c8bc359-1141-4c98-83e6-a5ca967fe180";
+        // Signed out: as today, the route needs a sign-in.
+        mvc.perform(get("/bff/api/v1/delivery/plan").session(gate())).andExpect(status().isUnauthorized());
+        var session=gate();signedInCheck();
+        switchTo(session,LEARNER,true);
+        keepTokens(session);
+        String token=csrf(session);
+        mvc.perform(get("/bff/api/v1/delivery/plan").session(session)).andExpect(status().isUnauthorized()).andExpect(content().string(""));
+        mvc.perform(post("/bff/api/v1/delivery/plan/work-items").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
+        mvc.perform(put("/bff/api/v1/delivery/plan/work-items/DLV-971").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
+        mvc.perform(post("/bff/api/v1/delivery/plan/work-items/DLV-971/resolve-conflict").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
+        mvc.perform(post(review+"/promote").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
+        // The other platform-review routes still reach the Domain as the test account (its own reviews, read by the learner).
+        domain("/api/v1/platform-reviews/me",HttpMethod.GET,"{\"data\":[]}",org.springframework.http.HttpStatus.OK);
+        mvc.perform(get("/bff/api/v1/platform-reviews/me").session(session)).andExpect(status().isOk());
+        fixture.server.verify();fixture.server.reset();
+        // Back to my account: the staff sign-in's bearer token travels, the test-account headers do not. (The Domain fixture is
+        // ordered: the write comes first because the sign-in check it triggers is the first expectation, and a read may reuse it.)
+        signedInCheck();
+        mvc.perform(post("/bff/api/v1/auth/test-session/end").session(session).header("X-CSRF-TOKEN",csrf(session))).andExpect(status().isOk());
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/api/v1/delivery/plan/work-items/DLV-971")).andExpect(method(HttpMethod.PUT))
+            .andExpect(MockRestRequestMatchers.header("Authorization","Bearer synthetic-access-token")).andExpect(MockRestRequestMatchers.header("If-Match","\"3\""))
+            .andExpect(headerDoesNotExist(TestSessionController.ACCOUNT_HEADER)).andExpect(headerDoesNotExist(TestSessionController.SECRET_HEADER))
+            .andExpect(MockRestRequestMatchers.content().string("{\"title\":\"Delivery routes\"}"))
+            .andRespond(withSuccess("{\"data\":{\"id\":\"DLV-971\"}}",MediaType.APPLICATION_JSON));
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/api/v1/delivery/plan")).andExpect(method(HttpMethod.GET))
+            .andExpect(MockRestRequestMatchers.header("Authorization","Bearer synthetic-access-token")).andExpect(headerDoesNotExist(TestSessionController.ACCOUNT_HEADER))
+            .andRespond(withSuccess("{\"data\":{\"workItems\":[]}}",MediaType.APPLICATION_JSON));
+        fixture.server.expect(requestTo(settings.domainApiUpstream()+"/api/v1/platform-reviews/6c8bc359-1141-4c98-83e6-a5ca967fe180/promote")).andExpect(method(HttpMethod.POST))
+            .andExpect(MockRestRequestMatchers.header("Authorization","Bearer synthetic-access-token"))
+            .andRespond(withStatus(org.springframework.http.HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body("{\"data\":{\"id\":\"DLV-972\"}}"));
+        mvc.perform(put("/bff/api/v1/delivery/plan/work-items/DLV-971").session(session).header("X-CSRF-TOKEN",csrf(session)).header("If-Match","\"3\"")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"Delivery routes\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("data.id").value("DLV-971"));
+        mvc.perform(get("/bff/api/v1/delivery/plan").session(session)).andExpect(status().isOk()).andExpect(jsonPath("data.workItems").isEmpty())
+            .andExpect(header().string("Cache-Control","no-store"));
+        mvc.perform(post(review+"/promote").session(session).header("X-CSRF-TOKEN",csrf(session)).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isCreated()).andExpect(jsonPath("data.id").value("DLV-972"));
+        // Not routes: the plan is never deleted or replaced whole, and a malformed id stops here.
+        mvc.perform(delete("/bff/api/v1/delivery/plan").session(session).header("X-CSRF-TOKEN",csrf(session))).andExpect(status().isNotFound());
+        mvc.perform(put("/bff/api/v1/delivery/plan").session(session).header("X-CSRF-TOKEN",csrf(session)).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isMethodNotAllowed());
+        mvc.perform(put("/bff/api/v1/delivery/plan/work-items/.DLV-971").session(session).header("X-CSRF-TOKEN",csrf(session)).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isMethodNotAllowed());
+        fixture.server.verify();
+    }
+
     /** Sign out while a test account is in use, after switching from your own sign-in, signs you out of your own sign-in too. */
     @Test void signOutFromASwitchedTestSessionEndsTheStaffSignIn()throws Exception {
         var session=gate();signedInCheck();
