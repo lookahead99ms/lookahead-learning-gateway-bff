@@ -125,3 +125,23 @@ account creation preserves UID/GID 10001, a non-login shell and the existing Jav
 readiness probe. CI continues to scan both exact bases and the built image,
 including unfixed findings; no image exception or severity change is introduced.
 Local image scans and smoke checks do not certify AWS deployment.
+
+### Delivery-route exception binding — 2026-11-06
+
+PR138 adds delivery-plan routes and platform-review promotion in the file already
+bound by the `java/user-controlled-bypass` review. Its previous whole-file digest
+therefore correctly failed the security helper tests. After reviewing the diff,
+only that digest is rebound: the rule, file, DLV-918 ownership and November 12
+expiry remain unchanged. The other CSRF exception is untouched.
+
+The reviewed login reauthentication/session-reuse logic is byte-for-byte unchanged.
+The new routes use exact method/path allowlists, reject DEV test sessions before
+forwarding, and require server OAuth authentication. Mutations retain the existing
+BFF CSRF protection and reject query strings; forwarding takes the server client's
+bearer, never the browser's Authorization or Cookie. Domain still enforces staff
+permissions. The route/security tests exercise these boundaries, and the helper
+regression proves the old digest cannot authorize the current controller.
+
+This repairs source-review bookkeeping, not a scanner finding or authentication
+implementation. Fresh full hosted CodeQL must still exercise both exact reviewed
+exceptions; unused exceptions, changed source and expiry continue to block.
