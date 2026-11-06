@@ -81,6 +81,19 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
+    // DLV-968: the cross-repository contracts live only in the Content repository; scripts/fetch-contracts.sh writes
+    // them to build/contracts/ and DomainContractTest reads them there. -PcontractsDir=<folder> points it elsewhere.
+    systemProperty 'contracts.dir', providers.gradleProperty('contractsDir').orElse('build/contracts').get()
+}
+
+// DLV-968: `clean check` must keep the fetched contracts, so clean removes everything under build/ except
+// build/contracts/. Delete that folder by hand (or fetch again) to refresh the contracts.
+tasks.named('clean', Delete) {
+    setDelete([])
+    doFirst {
+        def children = layout.buildDirectory.get().asFile.listFiles()
+        if (children != null) delete(children.findAll { it.name != 'contracts' })
+    }
 }
 
 jacoco {

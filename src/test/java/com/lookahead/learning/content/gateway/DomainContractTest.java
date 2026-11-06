@@ -44,12 +44,15 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 /**
- * DLV-968 T13: the Gateway owns {@code contracts/domain-api-v1.json}, the list of every Domain call it makes.
- * Each example is driven through the Gateway's own code against a mock Domain, and every Domain path literal in
- * {@code src/main/java} must be covered by the file, so neither side can drift silently.
+ * DLV-968 T13: the Gateway owns {@code domain-api-v1.json}, the list of every Domain call it makes. The master lives
+ * only in the Content repository ({@code docs/contracts/domain-api-v1.json}, owner decision 2026-11-05) and is fetched
+ * by {@code scripts/fetch-contracts.sh} into {@code build/contracts/} (or the folder named by {@code -Dcontracts.dir})
+ * before the tests run. Each example is driven through the Gateway's own code against a mock Domain, and every Domain
+ * path literal in {@code src/main/java} must be covered by the file, so neither side can drift silently.
  */
 class DomainContractTest {
-    static final Path CONTRACT = Path.of(System.getProperty("user.dir"), "src/test/resources/contracts/domain-api-v1.json");
+    static final Path CONTRACT = Path.of(System.getProperty("user.dir"))
+            .resolve(System.getProperty("contracts.dir", "build/contracts")).resolve("domain-api-v1.json");
     static final Path MAIN = Path.of(System.getProperty("user.dir"), "src/main/java");
     static final String UPSTREAM = "http://domain-api:8080";
     static final OAuthSettings LOCAL = new OAuthSettings("http://127.0.0.1:4331", "lookahead-domain-contract",
@@ -60,6 +63,8 @@ class DomainContractTest {
     static final Set<String> METHODS = Set.of("GET", "POST", "PUT", "DELETE");
 
     static JsonNode contract() throws IOException {
+        assertThat(CONTRACT).as("the Domain API contract is fetched from the Content repository, not kept here: "
+                + "run scripts/fetch-contracts.sh (it writes %s), then run the tests again", CONTRACT).exists();
         return JsonMapper.builder().build().readTree(Files.readString(CONTRACT));
     }
 
@@ -247,7 +252,7 @@ class DomainContractTest {
             }
         }
         assertThat(literals).isGreaterThan(30);
-        assertThat(uncovered).as("Domain path literals missing from contracts/domain-api-v1.json").isEmpty();
+        assertThat(uncovered).as("Domain path literals missing from domain-api-v1.json (Content docs/contracts, fetched to build/contracts)").isEmpty();
     }
 
     @Test void webPathsAreExactlyTheDestinationsTheGatewaySendsBrowsersTo() throws Exception {
