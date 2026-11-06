@@ -114,6 +114,8 @@ public class TestSessionController {
         // Who this session is changes, so its id rotates, as at sign-in; the gate admission stays in the session. Switching from
         // your own sign-in keeps it aside; switching between test accounts keeps the one already there.
         request.changeSessionId();
+        // DLV-971: a test session started while signed out has no activity stamp yet; without one the idle filter would end it at once.
+        request.getSession().setAttribute(LearnerIdleFilter.LAST_ACTIVITY, java.time.Instant.now());
         if (authentication instanceof OAuth2AuthenticationToken staff) request.getSession().setAttribute(STAFF_SIGN_IN, staff);
         var context = SecurityContextHolder.getContextHolderStrategy().createEmptyContext();
         context.setAuthentication(new TestSession(account.toString()));

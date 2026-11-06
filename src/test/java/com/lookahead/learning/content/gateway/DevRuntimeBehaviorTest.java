@@ -32,6 +32,32 @@ class DevRuntimeBehaviorTest {
         assertTrue(old.isInvalid()); assertNull(SecurityContextHolder.getContext().getAuthentication());
         assertNotNull(request.getSession().getAttribute(DevAdmission.ATTRIBUTE));
     }
+    /** DLV-971 (owner, 2026-11-06): a test session idles out like a sign-in, and takes the staff sign-in kept aside with it. */
+    @Test void idleExpiryEndsATestSessionAndTheStaffSignInKeptAsideButKeepsAdmission() throws Exception {
+        var request=new MockHttpServletRequest("GET","/learn");
+        request.getSession().setAttribute(DevAdmission.ATTRIBUTE,new DevAdmission.State("tester","admission",now.minusSeconds(2000)));
+        request.getSession().setAttribute(LearnerIdleFilter.LAST_ACTIVITY,now.minusSeconds(1800));
+        request.getSession().setAttribute(TestSessionController.STAFF_SIGN_IN,auth());
+        SecurityContextHolder.getContext().setAuthentication(new TestSessionController.TestSession("2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a"));
+        var old=(MockHttpSession)request.getSession();
+        var capture=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();capture.start();
+        var logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger("lookahead.event");logger.addAppender(capture);
+        try { new LearnerIdleFilter(Clock.fixed(now,ZoneOffset.UTC)).doFilter(request,new MockHttpServletResponse(),new MockFilterChain()); }
+        finally { logger.detachAppender(capture); }
+        assertTrue(old.isInvalid()); assertNull(SecurityContextHolder.getContext().getAuthentication());
+        assertNotNull(request.getSession().getAttribute(DevAdmission.ATTRIBUTE));
+        assertNull(request.getSession().getAttribute(TestSessionController.STAFF_SIGN_IN));
+        assertEquals("Signed out after 30 idle minutes: the test session ended with the staff sign-in kept aside, the DEV gate stays open",capture.list.get(0).getFormattedMessage());
+    }
+    /** DLV-971: a test session's requests refresh the stamp, so Back to my account does not meet an idle sign-out. */
+    @Test void aTestSessionRequestRefreshesTheActivityStamp() throws Exception {
+        var request=new MockHttpServletRequest("POST","/bff/api/v1/plans");var previous=now.minusSeconds(100);
+        request.getSession().setAttribute(LearnerIdleFilter.LAST_ACTIVITY,previous);
+        SecurityContextHolder.getContext().setAuthentication(new TestSessionController.TestSession("2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a"));
+        new LearnerIdleFilter(Clock.fixed(now,ZoneOffset.UTC)).doFilter(request,new MockHttpServletResponse(),new MockFilterChain());
+        assertEquals(now,request.getSession().getAttribute(LearnerIdleFilter.LAST_ACTIVITY));
+        assertNotNull(SecurityContextHolder.getContext().getAuthentication());
+    }
     @Test void pollingDoesNotExtendLearnerActivity() throws Exception {
         for(String path:List.of("/bff/api/v1/auth/me","/dev/session","/dev/csrf","/actuator/health")){
             var request=new MockHttpServletRequest("GET",path);var previous=now.minusSeconds(100);
