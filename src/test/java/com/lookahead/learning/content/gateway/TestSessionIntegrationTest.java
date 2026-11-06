@@ -102,6 +102,8 @@ class TestSessionIntegrationTest {
         var signedIn=((SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
         assertThat(TestSessionController.active(signedIn)).isTrue();assertThat(signedIn.getPrincipal()).isEqualTo(LEARNER);
         assertThat(session.getAttribute(DevAdmission.ATTRIBUTE)).isNotNull();
+        // DLV-971: the activity stamp is set at the start, so the idle filter does not end a session started while signed out.
+        assertThat(session.getAttribute(LearnerIdleFilter.LAST_ACTIVITY)).isInstanceOf(java.time.Instant.class);
         return session;
     }
 
