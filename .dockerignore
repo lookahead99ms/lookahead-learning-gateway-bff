@@ -11,6 +11,9 @@
 !gradle/wrapper/gradle-wrapper.properties
 !src/
 !src/**
+# DLV-968: the contracts fetched from Content by scripts/fetch-contracts.sh; the image build runs the tests.
+!build/contracts/
+!build/contracts/**
 
 # Exact public JVM DNS cache configuration required by the runtime COPY.
 !deployment/

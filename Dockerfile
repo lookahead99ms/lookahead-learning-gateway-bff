@@ -9,6 +9,9 @@ COPY gradle/wrapper/ gradle/wrapper/
 RUN ./gradlew --no-daemon --version
 COPY build.gradle settings.gradle ./
 COPY src/ src/
+# DLV-968: the Domain API contract lives only in the Content repository; run scripts/fetch-contracts.sh before
+# `docker build` so build/contracts/ exists (CI fetches it first). DomainContractTest reads it during `test`.
+COPY build/contracts/ build/contracts/
 # DLV-914: the jar is lookahead-gateway-<version>.jar and /actuator/info reports version, release tag and commit.
 RUN ./gradlew --no-daemon "-PreleaseVersion=$BUILD_VERSION" "-PreleaseTag=$RELEASE_VERSION" "-PsourceRevision=$SOURCE_REVISION" clean test bootJar \
     && test -f "/workspace/build/libs/lookahead-gateway-$BUILD_VERSION.jar" \

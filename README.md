@@ -23,10 +23,13 @@ project artifact is required. Dependencies come from Maven Central and the
 Gradle Plugin Portal.
 
 ```sh
+./scripts/fetch-contracts.sh
 ./gradlew --no-daemon clean test bootJar
 ```
 
-Windows uses `gradlew.bat`. The executable is `build/libs/lookahead-gateway.jar`;
+The first command fetches the Domain API contract from the Content repository into
+`build/contracts/` (see "Contracts with other repositories"); `DomainContractTest` reads it
+there. Windows uses `gradlew.bat`. The executable is `build/libs/lookahead-gateway.jar`;
 test reports are in `build/reports/tests/test/index.html`. The build retains Java
 parameter names used by Spring MVC. Its Spring Boot BOM and plugin stay pinned
 to the same version in `build.gradle`.
@@ -44,20 +47,44 @@ When upgrading Gradle, regenerate the Wrapper and update both reviewed checksums
 
 ## Contracts with other repositories
 
-No repository clones another at build or deploy time (owner decision, 2026-11-05). Every
-expectation this repository has of another is a committed contract file: the producer owns it,
-each side keeps its own copy, and each side tests its copy on its own pull request. Contracts
-are public by nature; anything that would need to stay private is not a contract but
-configuration, and it belongs to Infra.
+No repository clones another at build or deploy time, and no repository keeps a copy of a
+contract (owner decisions, 2026-11-05). Every cross-repository contract lives only in the
+Content repository under `docs/contracts/` (`registry.json` lists each one with its owner, master
+path and consumers). A consumer fetches the master files it needs from Content `main` on its
+own pull request, read-only, and runs its own tests against them. Contracts are public by
+nature; anything that would need to stay private is not a contract but configuration, and it
+belongs to Infra.
 
-| Contract file | Owner | Checked on this repo's PR by | Checked by the other side | Change order | What a failure means |
-| --- | --- | --- | --- | --- | --- |
-| `src/test/resources/contracts/domain-api-v1.json` (`gateway-domain-contract/v1`: every Domain call this Gateway makes, its method, path, success statuses and the response fields the Gateway reads) | Domain, the provider | `DomainContractTest`: the entries are well formed and unique, each proxied example is driven through `GatewayController.proxy` against a mock Domain and relays the listed status, the cloud sign-in actions match the call sites, and every Domain path literal in `src/main/java` is listed | Content's registry check (`docs/contracts/registry.json`) compares every copy with the master on Content pull requests; this repo keeps its copy and tests it locally | Domain first (route, status or field), then Gateway, then Web | A Gateway call is not in the contract, or a listed example is not relayed as listed: this repository is behind its own calls. The copies differ: a contract change merged on one side has not reached the other; update the copy that is behind |
+This Gateway owns `domain-api-v1` (`gateway-domain-contract/v1`: every Domain call this Gateway
+makes, its method, path, success statuses and the response fields the Gateway reads). A change
+to that contract is edited in Content first (`docs/contracts/domain-api-v1.json`, its own Content
+pull request), then this repository's pull request follows and is tested against the merged
+master; Domain (`DomainProviderContractTest`) and Web (`check-gateway-contract.mjs`) adopt it after.
 
-Today the contract file's own header and `DomainContractTest` describe it as this Gateway's
-consumer-driven list (consumer Gateway, provider Domain); the owner decision makes the
-producer its owner, and the change order above follows that decision. Content is the single
-registry of all copies; no workflow of this repository reads another repository.
+| Contract | Owner | Fetched to | Checked on this repo's PR by | What a failure means |
+| --- | --- | --- | --- | --- |
+| `domain-api-v1.json` (master: Content `docs/contracts/domain-api-v1.json`) | this Gateway | `build/contracts/domain-api-v1.json` by `scripts/fetch-contracts.sh` (git-ignored, kept by `clean`) | `DomainContractTest`: the entries are well formed and unique, each proxied example is driven through `GatewayController.proxy` against a mock Domain and relays the listed status, the cloud sign-in actions match the call sites, every Domain path literal in `src/main/java` is listed, and the web paths are exactly the destinations the Gateway sends browsers to | The file is missing: the fetch step did not run, or could not (see below). A Gateway call is not in the contract, or a listed example is not relayed as listed: the master in Content is behind this Gateway's calls, or this pull request changed a call without editing the master first |
+
+How the fetch works: `scripts/fetch-contracts.sh` reads the master through the GitHub contents
+API (`Accept: application/vnd.github.raw+json`) and writes `build/contracts/`. In CI the step
+"Fetch contracts from Content" runs it before the Gradle tests with the repository secret
+`CONTENT_READ_TOKEN`, a fine-grained token whose only permission is Contents: read on the Content
+repository; the token is never printed. Locally the script falls back to `GH_TOKEN`, then to your
+own `gh auth login`:
+
+```sh
+./scripts/fetch-contracts.sh
+./gradlew test --tests '*Contract*'
+```
+
+`CONTENT_REF` fetches another Content branch (for a contract change not yet merged) and
+`CONTRACTS_DIR`, with `-PcontractsDir=<folder>` on Gradle (`-Dcontracts.dir` in the test JVM),
+moves the folder. A missing file makes `DomainContractTest` fail with one message naming the
+script to run. The fetch script failing names the file, the HTTP status and the fix: 401/403 is
+an expired or under-scoped token, 404 is a file or branch that does not exist on Content (or a
+token that cannot read the private repository). `docker build` also needs the fetched folder,
+because the image build runs the tests. No workflow of this repository reads any other
+repository, and the deploy and release workflows are unchanged.
 
 ## Standalone local smoke run
 
@@ -106,10 +133,12 @@ returns.
 Build from this repository alone:
 
 ```sh
+./scripts/fetch-contracts.sh
 docker build --tag lookahead-gateway:local .
 ```
 
-The Docker build runs all tests before packaging. The runtime image contains the
+The Docker build runs all tests before packaging, so the fetched `build/contracts/` folder is
+part of its context. The runtime image contains the
 Java 21 JRE, `/opt/lookahead/app.jar` and the Java readiness helper in
 `/opt/lookahead/health`. It runs as UID/GID `10001:10001`, listens on container
 port `8080`, and checks `/actuator/health/readiness`. Its context allowlist
