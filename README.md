@@ -407,12 +407,35 @@ archive; Docker Desktop index IDs are kept separate from that config identity.
 ## Platform reviews relay (DLV-928)
 
 The proxy allows only the exact `/bff/api/v1/platform-reviews` routes (canonical lowercase
-UUIDs) and accepts `PUT` for these routes only; other routes keep GET/POST/DELETE. Writes
-reject query strings. Upload bodies are relayed unparsed and bounded to 21 MiB
+UUIDs) and accepts `PUT` for these routes and the delivery plan (below) only; other routes keep
+GET/POST/DELETE. Writes reject query strings. Upload bodies are relayed unparsed and bounded to 21 MiB
 (`spring.servlet.multipart.enabled=false`, so the Gateway never parses multipart); Domain
 enforces the image rules. `GatewayConfiguration.safeReturn` now accepts `/admin` paths, so
 sign-in returns to admin pages directly. Tests: `PlatformReviewGatewayTest`,
 `GatewayReturnDestinationTest`.
+
+## Delivery plan relay (DLV-971)
+
+`GatewayController.deliveryRoute` forwards the delivery plan the same way as platform reviews,
+with the session's bearer token and the session-bound CSRF token on writes; `If-Match` travels
+unchanged. The exact routes, `/bff/api/v1/...` to Domain `/api/v1/...`:
+
+| Method | Route | Note |
+| --- | --- | --- |
+| GET | `/delivery/plan` | query string allowed |
+| POST | `/delivery/plan/work-items` | |
+| PUT | `/delivery/plan/work-items/{id}` | `id` is `[A-Za-z0-9][A-Za-z0-9._-]{0,79}` |
+| POST | `/delivery/plan/work-items/{id}/resolve-conflict` | |
+| POST | `/platform-reviews/{uuid}/promote` | part of `platformReviewRoute`; puts a review on the plan |
+
+DELETE on the plan or a work item, PUT on the plan itself and malformed ids are not routes
+(404 or 405, never forwarded). Sessions: a signed-in staff sign-in forwards; signed out answers
+401 as every `/bff/api/v1` route; a DEV test session (`TestSessionController.active`) is refused
+for all five routes with the Previews/Architecture refusal (HTTP 401, empty body, Domain not
+asked), because test accounts are learners and never edit the plan. The other platform-review
+routes keep forwarding for a test session. Domain decides staff permissions. The routes are
+listed in the Domain contract (`domain-api-v1.json` in Content). Tests: `DeliveryRoutesTest`,
+`PlatformReviewGatewayTest`, `TestSessionIntegrationTest`.
 
 ## Blaze catalog route (DLV-931)
 

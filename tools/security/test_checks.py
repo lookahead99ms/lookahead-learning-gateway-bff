@@ -162,6 +162,34 @@ class SecurityGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '^SAST exception source changed or is missing$'):
                 checks.load_sast_exceptions(path, today=date(2026, 10, 27))
 
+    def test_review_records_reject_malformed_scope_expiry_and_duplicates(self):
+        policy = checks.json.loads(checks.SAST_EXCEPTIONS.read_text())
+        entry = policy['exceptions'][1]
+        invalid = [
+            ({'version': 2, 'exceptions': [entry]}, 'Invalid SAST exception contract'),
+            ({'version': 1, 'exceptions': [{**entry, 'rationale': ''}]}, 'Incomplete SAST exception'),
+            ({'version': 1, 'exceptions': [{**entry, 'file': '../outside.java'}]}, 'SAST exception file must be repository-relative'),
+            ({'version': 1, 'exceptions': [{**entry, 'expiresAt': 'not-a-date'}]}, 'Invalid SAST exception expiry'),
+            ({'version': 1, 'exceptions': [entry, entry]}, 'Duplicate SAST exception'),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'exceptions.json'
+            for document, message in invalid:
+                with self.subTest(reason=message):
+                    path.write_text(checks.json.dumps(document))
+                    with self.assertRaisesRegex(ValueError, '^' + message + '$'):
+                        checks.load_sast_exceptions(path, today=date(2026, 11, 6))
+
+    def test_pre_delivery_routes_bypass_digest_cannot_authorize_current_source(self):
+        policy = checks.json.loads(checks.SAST_EXCEPTIONS.read_text())
+        entry = next(row for row in policy['exceptions'] if row['ruleId'] == 'java/user-controlled-bypass')
+        entry['sourceSha256'] = 'bf0a8466a4d662dcc04b7b81590722876a73a5715663b6add48c0a0ee596f4f0'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'exceptions.json'
+            path.write_text(checks.json.dumps(policy))
+            with self.assertRaisesRegex(ValueError, '^SAST exception source changed or is missing$'):
+                checks.load_sast_exceptions(path, today=date(2026, 11, 6))
+
     def test_trace_notifications_are_informational_but_warnings_still_block(self):
         run = {'tool': {'driver': {'name': 'CodeQL', 'rules': [{'id': 'fixture'}]}},
                'results': [], 'invocations': [{'executionSuccessful': True,
