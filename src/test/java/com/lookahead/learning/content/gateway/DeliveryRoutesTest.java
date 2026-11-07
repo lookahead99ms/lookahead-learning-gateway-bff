@@ -99,6 +99,34 @@ class DeliveryRoutesTest {
         server.verify();
     }
 
+    @Test void inboxWritesKeepTheDeliveryAuthenticationAndForwardingBoundaries() throws Exception {
+        authorize();
+        String[][] routes = {{"PUT", plan + "/inbox"}, {"POST", plan + "/inbox/sync"}};
+        byte[] body = "{\"workItems\":[]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        for (String[] route : routes) {
+            server.expect(requestTo("http://domain" + route[1])).andExpect(method(HttpMethod.valueOf(route[0])))
+                    .andExpect(header("Authorization", "Bearer server-token"))
+                    .andExpect(headerDoesNotExist("Cookie")).andExpect(content().bytes(body))
+                    .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        }
+        for (String[] route : routes) {
+            var request = new MockHttpServletRequest(route[0], "/bff" + route[1]);
+            request.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            request.setContent(body);
+            request.addHeader("Authorization", "Bearer browser-token");
+            request.addHeader("Cookie", "private=value");
+            assertThat(controller.proxy(request, new MockHttpServletResponse(), authentication).getStatusCode().value()).isEqualTo(200);
+            assertThat(controller.proxy(request, new MockHttpServletResponse(), null).getStatusCode().value()).isEqualTo(401);
+            request.setQueryString("force=true");
+            assertThat(controller.proxy(request, new MockHttpServletResponse(), authentication).getStatusCode().value())
+                    .isEqualTo(route[0].equals("PUT") ? 405 : 404);
+            request.setQueryString(null);
+            request.setContent(new byte[8 * 1024 * 1024 + 1]);
+            assertThat(controller.proxy(request, new MockHttpServletResponse(), authentication).getStatusCode().value()).isEqualTo(413);
+        }
+        server.verify();
+    }
+
     @Test void readsAllowAQueryStringAndWritesDoNot() throws Exception {
         authorize();
         server.expect(requestTo("http://domain" + plan + "?since=2026-11-06")).andExpect(method(HttpMethod.GET))
@@ -135,7 +163,7 @@ class DeliveryRoutesTest {
         var gateway = new GatewayController(cloud, manager, mock(OAuth2AuthorizedClientRepository.class), builder.build());
         var testSession = new TestSessionController.TestSession("2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a");
         String review = "/api/v1/platform-reviews/6c8bc359-1141-4c98-83e6-a5ca967fe180";
-        for (String[] call : new String[][]{{"GET", plan}, {"POST", items}, {"PUT", items + "/DLV-971"}, {"POST", items + "/DLV-971/resolve-conflict"}, {"POST", review + "/promote"}}) {
+        for (String[] call : new String[][]{{"GET", plan}, {"POST", items}, {"PUT", items + "/DLV-971"}, {"POST", items + "/DLV-971/resolve-conflict"}, {"PUT", plan + "/inbox"}, {"POST", plan + "/inbox/sync"}, {"POST", review + "/promote"}}) {
             var request = new MockHttpServletRequest(call[0], "/bff" + call[1]);
             request.setContent("{}".getBytes());
             var response = gateway.proxy(request, new MockHttpServletResponse(), testSession);
