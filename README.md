@@ -426,8 +426,10 @@ unchanged. The exact routes, `/bff/api/v1/...` to Domain `/api/v1/...`:
 | POST | `/delivery/plan/work-items` | |
 | PUT | `/delivery/plan/work-items/{id}` | `id` is `[A-Za-z0-9][A-Za-z0-9._-]{0,79}` |
 | POST | `/delivery/plan/work-items/{id}/resolve-conflict` | |
+| PUT | `/delivery/plan/inbox` | the Delivery Plan page's Upload plan file: the local plan JSON as the body, merged by the Domain at once (owner or co-author; Domain decides); 8 MB body limit |
+| POST | `/delivery/plan/inbox/sync` | Sync plan inbox: merges a file already placed in `delivery/inbox/` (owner or co-author) |
 | POST | `/platform-reviews/{uuid}/promote` | part of `platformReviewRoute`; puts a review on the plan |
-| POST | `/sweeps/run` | `sweepsRoute`; the owner's Jobs buttons on Support tickets and feedback (`{"job": "support-requests" \| "delivery-inbox" \| "admissions" \| "all"}`; Domain answers the owner alone, 403 for an admin, 400 for another job, 409 `SWEEP_NOT_AVAILABLE` for `admissions` on a local Domain); 16 KB body limit |
+| POST | `/sweeps/run` | `sweepsRoute`; the owner's job buttons (Close idle tickets on Support tickets and feedback, Clean up admissions on People & Access) (`{"job": "support-requests" \| "delivery-inbox" \| "admissions" \| "all"}`; Domain answers the owner alone, 403 for an admin, 400 for another job, 409 `SWEEP_NOT_AVAILABLE` for `admissions` on a local Domain); 16 KB body limit |
 
 DELETE on the plan or a work item, PUT on the plan itself and malformed ids are not routes
 (404 or 405, never forwarded). Sessions: a signed-in staff sign-in forwards; signed out answers

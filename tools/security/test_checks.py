@@ -200,6 +200,16 @@ class SecurityGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '^SAST exception source changed or is missing$'):
                 checks.load_sast_exceptions(path, today=date(2026, 11, 6))
 
+    def test_pre_inbox_routes_digest_cannot_authorize_current_source(self):
+        policy = checks.json.loads(checks.SAST_EXCEPTIONS.read_text())
+        entry = next(row for row in policy['exceptions'] if row['ruleId'] == 'java/user-controlled-bypass')
+        entry['sourceSha256'] = '213742606cb158739fff2380ff8271b4d8ae29cf149a2a3ce7c87a8fcea7c72b'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'exceptions.json'
+            path.write_text(checks.json.dumps(policy))
+            with self.assertRaisesRegex(ValueError, '^SAST exception source changed or is missing$'):
+                checks.load_sast_exceptions(path, today=date(2026, 11, 7))
+
     def test_trace_notifications_are_informational_but_warnings_still_block(self):
         run = {'tool': {'driver': {'name': 'CodeQL', 'rules': [{'id': 'fixture'}]}},
                'results': [], 'invocations': [{'executionSuccessful': True,
