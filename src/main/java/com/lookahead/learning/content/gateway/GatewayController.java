@@ -144,15 +144,18 @@ public class GatewayController {
         // DLV-971: the delivery plan follows the platform-review rules (query string on GET only).
         boolean delivery = deliveryRoute(request.getMethod(), upstreamPath)
                 && ("GET".equals(request.getMethod()) || request.getQueryString() == null);
+        // DLV-971: the owner's "run the 4-hour jobs now"; no query string, no body to speak of.
+        boolean sweeps = sweepsRoute(request.getMethod(), upstreamPath) && request.getQueryString() == null;
         // PUT exists only for platform reviews and delivery work items; every other route keeps its earlier methods.
         if("PUT".equals(request.getMethod()) && !platformReview && !delivery)return ResponseEntity.status(405).header(HttpHeaders.CACHE_CONTROL,"no-store").build();
-        if(!content && !account && !execution && !authorReview && !platformReview && !delivery && !staffAccess && !membership && !directory)return ResponseEntity.notFound().build();
+        if(!content && !account && !execution && !authorReview && !platformReview && !delivery && !sweeps && !staffAccess && !membership && !directory)return ResponseEntity.notFound().build();
         boolean testSession=settings.cloud() && TestSessionController.active(authentication);
-        // DLV-971: the delivery plan, and promoting a review onto it, are staff work. A test account is a learner, so a test
-        // session is refused as Previews/Architecture refuse it (AuthorPreviewController): HTTP 401, empty body, Domain not asked.
-        if ((delivery || promoteRoute(request.getMethod(), upstreamPath)) && testSession) return AuthorPreviewProxy.empty(401);
-        if ((directory || authorReview || platformReview || delivery || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken) && !testSession) return ResponseEntity.status(401).build();
-        int bodyLimit = (authorReview || staffAccess) ? 16 * 1024 : execution ? 512 * 1024 : platformReview ? PLATFORM_REVIEW_BODY_BYTES : 8 * 1024 * 1024;
+        // DLV-971: the delivery plan, promoting a review onto it and running the sweeps are staff work. A test account is a
+        // learner, so a test session is refused as Previews/Architecture refuse it (AuthorPreviewController): HTTP 401, empty
+        // body, Domain not asked.
+        if ((delivery || sweeps || promoteRoute(request.getMethod(), upstreamPath)) && testSession) return AuthorPreviewProxy.empty(401);
+        if ((directory || authorReview || platformReview || delivery || sweeps || staffAccess || membership && !Set.of("/api/v1/membership/plans","/api/v1/sales/active").contains(upstreamPath)) && !(authentication instanceof OAuth2AuthenticationToken) && !testSession) return ResponseEntity.status(401).build();
+        int bodyLimit = (authorReview || staffAccess || sweeps) ? 16 * 1024 : execution ? 512 * 1024 : platformReview ? PLATFORM_REVIEW_BODY_BYTES : 8 * 1024 * 1024;
         byte[] body=request.getInputStream().readNBytes(bodyLimit + 1);
         if(body.length>bodyLimit)return ResponseEntity.status(413).build();
         String target=settings.domainApiUpstream()+upstreamPath+(request.getQueryString()==null?"":"?"+request.getQueryString());
@@ -189,13 +192,18 @@ public class GatewayController {
                 && path.matches("/api/v1/author/review-artifacts/[a-z0-9][a-z0-9-]{0,79}/events");
     }
 
-    private static final String PLATFORM_REVIEW_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    private static final String UUID_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    /**
+     * A platform-review item id: the UUIDs of the day-file records, or the numbered ids of the runtime record stores
+     * (REV-000001 for feedback, SUP-000001 for a learner support ticket; DLV-971, owner 2026-11-06). Attachment ids stay UUIDs.
+     */
+    private static final String PLATFORM_REVIEW_ID = "(?:" + UUID_ID + "|(?:REV|SUP)-[0-9]{6,})";
     private static final String PLATFORM_REVIEWS = "/api/v1/platform-reviews", PLATFORM_REVIEW = PLATFORM_REVIEWS + "/" + PLATFORM_REVIEW_ID;
     static boolean platformReviewRoute(String method, String path) {
         String root = PLATFORM_REVIEWS, item = PLATFORM_REVIEW;
         return switch (method) {
             case "GET" -> path.equals(root) || path.equals(root + "/me") || path.matches(item)
-                    || path.matches(item + "/attachments/" + PLATFORM_REVIEW_ID);
+                    || path.matches(item + "/attachments/" + UUID_ID);
             case "POST" -> path.equals(root) || promoteRoute(method, path);
             case "PUT" -> path.matches(item) || path.matches(item + "/triage");
             case "DELETE" -> path.matches(item);
@@ -205,6 +213,11 @@ public class GatewayController {
     /** DLV-971: promoting a platform review onto the delivery plan; one of the platform-review routes, staff sign-ins only. */
     static boolean promoteRoute(String method, String path) {
         return "POST".equals(method) && path.matches(PLATFORM_REVIEW + "/promote");
+    }
+
+    /** DLV-971: the owner's "Run the 4-hour jobs now" (Domain decides it is the owner); staff sign-ins only, like the delivery plan. */
+    static boolean sweepsRoute(String method, String path) {
+        return "POST".equals(method) && "/api/v1/sweeps/run".equals(path);
     }
 
     /** DLV-971: the delivery plan. A work item id is a letter or digit followed by up to 79 letters, digits, dots, underscores or hyphens. */

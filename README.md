@@ -427,15 +427,16 @@ unchanged. The exact routes, `/bff/api/v1/...` to Domain `/api/v1/...`:
 | PUT | `/delivery/plan/work-items/{id}` | `id` is `[A-Za-z0-9][A-Za-z0-9._-]{0,79}` |
 | POST | `/delivery/plan/work-items/{id}/resolve-conflict` | |
 | POST | `/platform-reviews/{uuid}/promote` | part of `platformReviewRoute`; puts a review on the plan |
+| POST | `/sweeps/run` | `sweepsRoute`; the owner's Jobs buttons on Support tickets and feedback (`{"job": "support-requests" \| "delivery-inbox" \| "admissions" \| "all"}`; Domain answers the owner alone, 403 for an admin, 400 for another job, 409 `SWEEP_NOT_AVAILABLE` for `admissions` on a local Domain); 16 KB body limit |
 
 DELETE on the plan or a work item, PUT on the plan itself and malformed ids are not routes
 (404 or 405, never forwarded). Sessions: a signed-in staff sign-in forwards; signed out answers
 401 as every `/bff/api/v1` route; a DEV test session (`TestSessionController.active`) is refused
-for all five routes with the Previews/Architecture refusal (HTTP 401, empty body, Domain not
-asked), because test accounts are learners and never edit the plan. The other platform-review
-routes keep forwarding for a test session. Domain decides staff permissions. The routes are
-listed in the Domain contract (`domain-api-v1.json` in Content). Tests: `DeliveryRoutesTest`,
-`PlatformReviewGatewayTest`, `TestSessionIntegrationTest`.
+for all six routes with the Previews/Architecture refusal (HTTP 401, empty body, Domain not
+asked), because test accounts are learners and never edit the plan or run its jobs. The other
+platform-review routes keep forwarding for a test session. Domain decides staff permissions. The
+routes are listed in the Domain contract (`domain-api-v1.json` in Content). Tests:
+`DeliveryRoutesTest`, `SweepsRouteTest`, `PlatformReviewGatewayTest`, `TestSessionIntegrationTest`.
 
 ## Blaze catalog route (DLV-931)
 
