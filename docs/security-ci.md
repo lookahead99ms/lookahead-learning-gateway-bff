@@ -145,3 +145,19 @@ regression proves the old digest cannot authorize the current controller.
 This repairs source-review bookkeeping, not a scanner finding or authentication
 implementation. Fresh full hosted CodeQL must still exercise both exact reviewed
 exceptions; unused exceptions, changed source and expiry continue to block.
+
+### Record-ID and sweeps exception binding — 2026-11-06
+
+PR143 expands platform-review item IDs to accept numbered `REV-`/`SUP-` records;
+attachment IDs remain UUID-only. It also relays the exact POST `/api/v1/sweeps/run`
+route, rejecting query strings, bodies over 16 KiB and DEV test sessions. The relay
+requires server OAuth authentication and forwards the server client's bearer;
+Domain owns the owner-only authorization decision. Existing BFF CSRF stays enabled.
+
+After reviewing those changes and the unchanged login code, the existing login
+exception is rebound to the controller's current whole-file digest. Its rule,
+file, ticket and November 12 expiry are unchanged. The regression rejects the
+previous digest, and the route/security tests cover the affected boundaries.
+This fixes stale review metadata; fresh hosted CodeQL must still validate the PR.
+CI fetches the API contract from Content main, so the companion `sweeps-run`
+contract entry must merge there before this Gateway's contract check can pass.
