@@ -53,6 +53,17 @@ class DeliveryRoutesTest {
             assertThat(GatewayController.deliveryRoute("POST", path)).as(path).isFalse();
         for (String path : new String[]{plan, items, items + "/DLV-971/resolve-conflict"})
             assertThat(GatewayController.deliveryRoute("PUT", path)).as(path).isFalse();
+        // The plan inbox (owner, 2026-11-07): PUT the file, POST the sync; nothing else under /inbox.
+        assertThat(GatewayController.deliveryRoute("PUT", plan + "/inbox")).isTrue();
+        assertThat(GatewayController.deliveryRoute("POST", plan + "/inbox/sync")).isTrue();
+        for (String path : new String[]{plan + "/inbox/", plan + "/inbox/sync", plan + "/inbox/plan.json", plan + "/inbox/../plan"})
+            assertThat(GatewayController.deliveryRoute("PUT", path)).as(path).isFalse();
+        for (String path : new String[]{plan + "/inbox", plan + "/inbox/sync/", plan + "/inbox/merge", plan + "/inbox/sync/now"})
+            assertThat(GatewayController.deliveryRoute("POST", path)).as(path).isFalse();
+        for (String path : new String[]{plan + "/inbox", plan + "/inbox/sync"}) {
+            assertThat(GatewayController.deliveryRoute("GET", path)).as(path).isFalse();
+            assertThat(GatewayController.deliveryRoute("DELETE", path)).as(path).isFalse();
+        }
         for (String path : new String[]{plan, items, items + "/DLV-971", items + "/DLV-971/resolve-conflict"}) {
             assertThat(GatewayController.deliveryRoute("DELETE", path)).as(path).isFalse();
             assertThat(GatewayController.deliveryRoute("PATCH", path)).as(path).isFalse();

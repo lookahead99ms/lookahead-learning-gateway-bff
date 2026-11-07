@@ -225,8 +225,9 @@ public class GatewayController {
     static boolean deliveryRoute(String method, String path) {
         return switch (method) {
             case "GET" -> path.equals(DELIVERY_PLAN);
-            case "POST" -> path.equals(DELIVERY_PLAN + "/work-items") || path.matches(WORK_ITEM + "/resolve-conflict");
-            case "PUT" -> path.matches(WORK_ITEM);
+            // DLV-971 (owner, 2026-11-07): the Delivery Plan page's Upload plan file (the file as the body) and Sync plan inbox.
+            case "POST" -> path.equals(DELIVERY_PLAN + "/work-items") || path.matches(WORK_ITEM + "/resolve-conflict") || path.equals(DELIVERY_PLAN + "/inbox/sync");
+            case "PUT" -> path.matches(WORK_ITEM) || path.equals(DELIVERY_PLAN + "/inbox");
             default -> false;
         };
     }
