@@ -161,3 +161,16 @@ previous digest, and the route/security tests cover the affected boundaries.
 This fixes stale review metadata; fresh hosted CodeQL must still validate the PR.
 CI fetches the API contract from Content main, so the companion `sweeps-run`
 contract entry must merge there before this Gateway's contract check can pass.
+
+### Delivery inbox exception binding — 2026-11-07
+
+PR146 adds only exact PUT `/api/v1/delivery/plan/inbox` and POST
+`/api/v1/delivery/plan/inbox/sync` entries to the delivery allowlist. Both retain
+server OAuth authentication, refusal of DEV test sessions, mutation query-string
+rejection, the 8 MiB body limit and server bearer forwarding. BFF session CSRF
+and login/reauthentication code are unchanged; Domain owns operation permissions
+and plan validation. The existing login review is rebound to the complete source
+after checking that diff. Its rule, file, owner and November 12 expiry remain
+unchanged. Regression tests reject the old digest and exercise both inbox routes'
+forwarding, authentication, query/body limits and test-session rejection.
+Fresh hosted CodeQL remains required; this metadata update is not a scan result.
