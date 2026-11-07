@@ -60,6 +60,17 @@ class PlatformReviewGatewayTest {
         assertThat(GatewayController.platformReviewRoute("POST", root + "/" + id)).isFalse();
         assertThat(GatewayController.platformReviewRoute("DELETE", root)).isFalse();
         assertThat(GatewayController.platformReviewRoute("PATCH", root + "/" + id)).isFalse();
+        // DLV-971 (owner, 2026-11-06): the runtime record stores number their items; the same routes accept REV-000001 and SUP-000001.
+        for (String record : new String[]{"REV-000001", "SUP-000014", "REV-1234567"}) {
+            for (String path : new String[]{root + "/" + record, root + "/" + record + "/attachments/" + id})
+                assertThat(GatewayController.platformReviewRoute("GET", path)).as(path).isTrue();
+            assertThat(GatewayController.platformReviewRoute("PUT", root + "/" + record)).as(record).isTrue();
+            assertThat(GatewayController.platformReviewRoute("PUT", root + "/" + record + "/triage")).as(record).isTrue();
+            assertThat(GatewayController.platformReviewRoute("DELETE", root + "/" + record)).as(record).isTrue();
+            assertThat(GatewayController.promoteRoute("POST", root + "/" + record + "/promote")).as(record).isTrue();
+        }
+        for (String bad : new String[]{"REV-00001", "rev-000001", "SUP-000001x", "DLV-000001", "REV-000001/attachments/REV-000001"})
+            assertThat(GatewayController.platformReviewRoute("GET", root + "/" + bad)).as(bad).isFalse();
     }
 
     @Test void uploadIsRelayedUnchangedWithIdempotencyKeyAndServerBearer() throws Exception {
