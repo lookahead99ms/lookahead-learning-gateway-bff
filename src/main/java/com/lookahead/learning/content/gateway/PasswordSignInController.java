@@ -205,7 +205,7 @@ public class PasswordSignInController {
         if (challenge == null || session == null || session.isBlank()) {
             // DLV-969: Cognito answered with neither tokens nor a usable next step; the page only sees SERVICE_UNAVAILABLE.
             OpsLog.failed("sign-in.cognito-step", "COGNITO_ANSWER_INCOMPLETE").addKeyValue("cognito.challenge", challenge == null ? "none" : challenge.toString())
-                .log("Cognito's sign-in answer had no tokens and {}; answered 503", challenge == null ? "no next step" : "no session for step " + challenge);
+                .log("Cognito's sign-in answer was incomplete: COGNITO_ANSWER_INCOMPLETE (no tokens and {}); answered 503", challenge == null ? "no next step" : "no session for step " + challenge);
             return failure(503, "SERVICE_UNAVAILABLE");
         }
         String kind = switch (challenge) {
@@ -216,7 +216,7 @@ public class PasswordSignInController {
         };
         if (kind == null) {
             OpsLog.failed("sign-in.cognito-step", "COGNITO_STEP_UNSUPPORTED").addKeyValue("cognito.challenge", challenge.toString())
-                .log("Cognito asked for sign-in step {}, which our sign-in page does not support (check the pool's MFA and sign-in settings); answered 503", challenge);
+                .log("Cognito asked for sign-in step {}: COGNITO_STEP_UNSUPPORTED (our sign-in page does not support it; check the pool's MFA and sign-in settings); answered 503", challenge);
             return failure(503, "SERVICE_UNAVAILABLE");
         }
         request.getSession(true).setAttribute(PENDING, new Pending(username, challenge.toString(), session, clock.instant().plus(CHALLENGE_WINDOW), returnTo));
@@ -269,7 +269,7 @@ public class PasswordSignInController {
         } catch (CognitoIdentityProviderException rejected) {
             var answer = mapped(rejected);
             if (answer.getStatusCode().value() == 429)
-                OpsLog.limit("cognito", 0, null, event, "Rate limit reached: {} refused by Cognito ({})", event, OpsLog.awsCode(rejected));
+                OpsLog.limit("cognito", 0, null, event, "Rate limit cognito reached: {} refused by Cognito ({})", event, OpsLog.awsCode(rejected));
             return outcome(event, answer, null);
         } catch (RuntimeException unavailable) {
             return outcome(event, failure(503, "SERVICE_UNAVAILABLE"), RequestLog.types(unavailable));

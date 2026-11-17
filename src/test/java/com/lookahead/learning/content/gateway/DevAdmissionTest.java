@@ -142,19 +142,19 @@ class DevAdmissionTest {
             assertEquals("DEV gate recheck passed: the user is still enabled in the sign-in pool", capture.list.getLast().getFormattedMessage());
             allowed.set(null);
             filter.doFilter(request("/", now.minusSeconds(600)), new MockHttpServletResponse(), new MockFilterChain());
-            assertEquals("DEV gate recheck could not reach the sign-in pool (IllegalStateException); the session continues and the next request asks again",
+            assertEquals("DEV gate recheck failed: PROVIDER_UNAVAILABLE (the sign-in pool did not answer: IllegalStateException); the session continues and the next request asks again",
                 capture.list.getLast().getFormattedMessage());
             assertTrue(OpsLogTest.pairs(capture.list.getLast()).contains("reason=PROVIDER_UNAVAILABLE"));
             allowed.set(false);
             filter.doFilter(request("/", now.minusSeconds(600)), new MockHttpServletResponse(), new MockFilterChain());
-            assertEquals("DEV gate closed: the 5-minute recheck found the user disabled or deleted in the sign-in pool; session ended", capture.list.getLast().getFormattedMessage());
+            assertEquals("DEV gate closed: USER_DISABLED_OR_DELETED (the 5-minute recheck found the user disabled or deleted in the sign-in pool); session ended", capture.list.getLast().getFormattedMessage());
             assertEquals(ch.qos.logback.classic.Level.WARN, capture.list.getLast().getLevel());
             // The 8-hour window ends; a browser with no admission is refused at INFO.
             filter().doFilter(request("/learn", now.minusSeconds(8 * 3600)), new MockHttpServletResponse(), new MockFilterChain());
-            assertEquals("DEV gate closed: the 8-hour window ended; session ended", capture.list.getLast().getFormattedMessage());
+            assertEquals("DEV gate closed: WINDOW_EXPIRED (the 8-hour window ended); session ended", capture.list.getLast().getFormattedMessage());
             assertTrue(OpsLogTest.pairs(capture.list.getLast()).contains("reason=WINDOW_EXPIRED"));
             filter().doFilter(request("/learn", null), new MockHttpServletResponse(), new MockFilterChain());
-            assertEquals("DEV gate closed for GET /learn: no admission in this browser session", capture.list.getLast().getFormattedMessage());
+            assertEquals("DEV gate closed for GET /learn: DEV_ADMISSION_REQUIRED (no admission in this browser session)", capture.list.getLast().getFormattedMessage());
             assertEquals(ch.qos.logback.classic.Level.INFO, capture.list.getLast().getLevel());
         } finally { events.detachAppender(capture); }
         for (var line : capture.list) {
@@ -176,7 +176,7 @@ class DevAdmissionTest {
                 new LearnerIdleFilter(Clock.fixed(now, ZoneOffset.UTC)).doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
             }
         } finally { events.detachAppender(capture); org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
-        assertEquals("Signed out after 30 idle minutes: the learner sign-in ended, the DEV gate stays open", capture.list.get(0).getFormattedMessage());
+        assertEquals("Signed out: IDLE_TIMEOUT (no activity for 30 minutes); the learner sign-in ended, the DEV gate stays open", capture.list.get(0).getFormattedMessage());
         assertTrue(OpsLogTest.pairs(capture.list.get(0)).contains("reason=IDLE_TIMEOUT"));
         assertTrue(OpsLogTest.pairs(capture.list.get(1)).contains("reason=NO_ACTIVITY_RECORDED"));
     }

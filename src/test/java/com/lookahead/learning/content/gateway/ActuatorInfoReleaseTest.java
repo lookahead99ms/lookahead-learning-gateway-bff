@@ -32,8 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("gateway")
 class ActuatorInfoReleaseTest {
     @Configuration
-    @EnableAutoConfiguration(excludeName = {"org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
-            "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"})
+    @EnableAutoConfiguration(excludeName = {"org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"})
     @Import({ActiveSignInTestConfiguration.class, GatewayConfiguration.class, GatewayClientConfiguration.class,
             OAuthPropertiesConfiguration.class, GatewayController.class})
     static class Application { }

@@ -83,7 +83,7 @@ public final class DevAdmission extends OncePerRequestFilter {
         try {
             if (!account.allowed(state.username())) {
                 OpsLog.refused("dev-gate.rechecked", "USER_DISABLED_OR_DELETED")
-                    .log("DEV gate closed: the {}-minute recheck found the user disabled or deleted in the sign-in pool; session ended", RECHECK.toMinutes());
+                    .log("DEV gate closed: USER_DISABLED_OR_DELETED (the {}-minute recheck found the user disabled or deleted in the sign-in pool); session ended", RECHECK.toMinutes());
                 return false;
             }
             session.setAttribute(CHECKED, now);
@@ -91,7 +91,7 @@ public final class DevAdmission extends OncePerRequestFilter {
         } catch (RuntimeException unavailable) {
             // The pool did not answer: keep the session; the next request asks again.
             OpsLog.failed("dev-gate.rechecked", "PROVIDER_UNAVAILABLE").addKeyValue("exception.types", RequestLog.types(unavailable))
-                .log("DEV gate recheck could not reach the sign-in pool ({}); the session continues and the next request asks again",
+                .log("DEV gate recheck failed: PROVIDER_UNAVAILABLE (the sign-in pool did not answer: {}); the session continues and the next request asks again",
                     RequestLog.types(unavailable));
         }
         return true;
@@ -108,12 +108,12 @@ public final class DevAdmission extends OncePerRequestFilter {
             chain.doFilter(request, response); return;
         }
         if (session != null && session.getAttribute(ATTRIBUTE) instanceof State state && !clock.instant().isBefore(state.admittedAt().plus(WINDOW)))
-            OpsLog.refused("dev-gate.expired", "WINDOW_EXPIRED").log("DEV gate closed: the {}-hour window ended; session ended", WINDOW.toHours());
+            OpsLog.refused("dev-gate.expired", "WINDOW_EXPIRED").log("DEV gate closed: WINDOW_EXPIRED (the {}-hour window ended); session ended", WINDOW.toHours());
         // Not admitted yet (a first visit, a crawler, a signed-out browser): INFO, so the gate page itself never floods WARN.
         else if (session == null || !(session.getAttribute(ATTRIBUTE) instanceof State))
             OpsLog.event(org.slf4j.event.Level.INFO, "dev-gate.required", "refused").addKeyValue("reason", "DEV_ADMISSION_REQUIRED")
                 .addKeyValue("http.method", RequestLog.method(request)).addKeyValue("url.path", RequestLog.path(request))
-                .log("DEV gate closed for {} {}: no admission in this browser session", RequestLog.method(request), RequestLog.path(request));
+                .log("DEV gate closed for {} {}: DEV_ADMISSION_REQUIRED (no admission in this browser session)", RequestLog.method(request), RequestLog.path(request));
         if (session != null) { SecurityAuditFilter.record(SecurityAuditFilter.Event.SESSION_ENDED); session.invalidate(); org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
         response.setHeader("Cache-Control", "no-store");
         // /dev/session is polled by the Web shell as an API; the open /dev routes above never reach here.

@@ -64,7 +64,7 @@ final class CloudGatewaySessions {
     private static org.springframework.web.client.RestClientException unreadable(String action,int status,String reason,String words,RuntimeException failure){
         var line=OpsLog.failed("cloud-session."+action,reason).addKeyValue("upstream.service","domain").addKeyValue("upstream.status",status);
         if(failure!=null)line=line.addKeyValue("exception.types",RequestLog.types(failure));
-        line.log("Domain's answer to cloud sign-in {} (HTTP {}) was unreadable: {}{}",action,status,words,failure==null?"":" ("+RequestLog.types(failure)+")");
+        line.log("Domain's answer to cloud sign-in {} (HTTP {}) was unreadable: {} ({}{})",action,status,reason,words,failure==null?"":": "+RequestLog.types(failure));
         return new org.springframework.web.client.RestClientException("Invalid Domain response");
     }
 }

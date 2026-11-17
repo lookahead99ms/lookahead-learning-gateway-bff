@@ -305,16 +305,89 @@ step also invokes `check` so its local workflow definition enforces this gate.
 Provider fixtures and generated keys are synthetic. These checks do not certify
 live Cognito login/token exchange, external TLS certificates, private network
 reachability, ECS secret delivery, deployed cookie/proxy behavior or multi-instance
-recovery. Those remain deployment integration checks. The Gateway owns no RDS
-connection; database connectivity and schema/readiness tests belong to Domain.
+recovery. Those remain deployment integration checks. The Gateway owns no
+database connection; store connectivity and readiness tests belong to Domain (DynamoDB only since 2026-11-17).
 
 The container readiness probe is production Java source at `src/main/java/com/lookahead/gateway/health/ContainerHealthcheck.java`, so the ordinary JaCoCo report includes it. Tests use loopback HTTP fixtures to cover healthy and failed responses, malformed bodies, redirects, unavailable endpoints, timeouts and interruption. The container probes `127.0.0.1:8080/actuator/health/readiness`, or `127.0.0.1:8081/actuator/health/readiness` when the task sets `LOOKAHEAD_RUNTIME_MODE=lower-cost-dev` (that profile moves actuator to the loopback management port), with a two-second connection limit and three-second request limit. The process-exit wrapper remains in the measured source inventory.
 
-DLV-969 (2026-11-04): why a task stopped serving is in its own log stream, on the `lookahead.lifecycle` logger (filter on `event.action`). A failed probe writes one ECS JSON line to the application's stdout (`/proc/1/fd/1`, falling back to the probe's stderr) with a `reason` (`CONNECTION_REFUSED`, `TIMEOUT`, `NOT_READY`, `HTTP_<status>`, `UNEXPECTED_ANSWER`, `NO_ANSWER`), once when it starts or changes, then at most once a minute, and once at INFO when it passes again; `/tmp/lookahead-healthcheck.state` remembers between probes and never changes the exit code. Inside the application: every readiness and liveness change (`availability.*`), one `startup.ready` summary (version, release tag, commit, profiles, ports, upstream host names), any health indicator that is not UP (`health.check`, on change and once a minute; UP again once), every refused start naming the setting or injected variable by name only (`startup.refused`), and one `shutdown.requested` line with uptime and the readiness before the stop. Tests: `LifecycleLogTest`, `HealthLogTest`, `LifecycleJsonTest`, `StartupRefusalLogTest`, `ContainerHealthcheckTest`, `InjectedCredentialsTest`.
+DLV-969 (2026-11-04), plain lines since 2026-11-17: why a task stopped serving is in the application's own log stream, as plain sentences (see "Logs: plain lines" below; nothing to filter on, search for the words). A failed probe writes one plain WARN line to the application's stdout (`/proc/1/fd/1`, falling back to the probe's stderr), in the same shape as the application's lines, with the reason code in the sentence (`CONNECTION_REFUSED`, `TIMEOUT`, `NOT_READY`, `HTTP_<status>`, `UNEXPECTED_ANSWER`, `NO_ANSWER`), the failures in a row and the seconds down: `2026-11-04T20:00:00.000Z WARN  Container health check failed: CONNECTION_REFUSED (nothing is listening on 127.0.0.1:8081); probe 127.0.0.1:8081/actuator/health/readiness, 1 failed in a row, down for 0 s`. Once when it starts or changes, then at most once a minute, and once at INFO when it passes again (`Container health check passed again: READY after 120 s down and 6 failed probes (last reason NOT_READY)`); `/tmp/lookahead-healthcheck.state` remembers between probes and never changes the exit code. Inside the application: every readiness and liveness change with its reason code in the sentence (`Readiness changed to REFUSING_TRAFFIC (was ACCEPTING_TRAFFIC): MARKED_REFUSING_TRAFFIC (…)`, `Liveness changed to BROKEN …: LIVENESS_BROKEN (…)`), one `Started and ready:` summary (version, release tag, commit, profiles, deployment environment, readiness, liveness, ports, upstream host names), any health indicator that is not UP (`Health check <name> is <status> (<reason>): …`, on change and once a minute; UP again once), every refused start naming the setting or injected variable by name only (`Startup refused: <setting> … (<reason>) …`), and one `Stopping: shutdown requested …` line with uptime and the readiness before the stop. Tests: `LifecycleLogTest`, `HealthLogTest`, `PlainLogLineTest`, `StartupRefusalLogTest`, `ContainerHealthcheckTest`, `InjectedCredentialsTest`.
 
 Docker resolves the checksum-pinned Gradle wrapper in a source-independent layer before copying build declarations and application sources. This reuses the wrapper download when source files change; dependency versions and the `clean test bootJar` build remain unchanged.
 
 DEV/PROD client and Gateway-to-Domain secrets must contain the injected secret values. Startup rejects secret ARNs, unresolved configuration/CloudFormation references, whitespace/control characters and invalid lengths; ECS task-definition `valueFrom` resolves the ARN before application startup. Local configuration retains its existing contract.
+
+## Logs: plain lines
+
+Owner decision 2026-11-17: the Gateway's logs are for one person troubleshooting in CloudWatch, not for dashboards. Every
+line is one sentence a person can read without a schema: no JSON, no key=value block, no logger name, thread, PID or service
+name. The same pattern serves every profile (local, lower-cost-dev, prod); it is set once in `src/main/resources/application.yml`
+(`logging.pattern.console`), so a local run reads exactly like DEV.
+
+```
+<UTC timestamp with millis> <LEVEL padded to 5> <sentence>  [request <first 8 characters of the request id>]
+```
+
+```
+2026-11-17T20:41:18.144Z INFO  POST /bff/api/v1/auth/password/sign-in -> 200 in 371 ms  [request 5e17c0aa]
+2026-11-17T20:41:18.110Z INFO  Upstream cognito InitiateAuth succeeded in 21 ms  [request 5e17c0aa]
+2026-11-17T20:44:12.300Z WARN  Password sign-in refused: INVALID_CREDENTIALS (wrong email or password)  [request 7a51d9e0]
+2026-11-17T21:05:41.120Z ERROR GET /bff/api/v1/admin/accounts failed after 3005 ms: upstream domain GET /api/v1/admin/accounts at domain.lookahead-dev.internal:8443 gave no answer in 3002 ms (SocketTimeoutException: Read timed out); answered 503 SERVICE_UNAVAILABLE; reference c71e0b58-…; the connection was made but no answer came in time: the domain is up but slow or stuck  [request c71e0b58]
+java.net.SocketTimeoutException: Read timed out
+	at …
+2026-11-17T18:52:30.004Z INFO  Started and ready: Gateway 2026.11.17.1 (release v2026.11.17.18.00, commit abc1234), profiles [gateway,lower-cost-dev], environment dev, readiness ACCEPTING_TRAFFIC, liveness CORRECT, port 8443, management port 8081, upstreams domain=domain.lookahead-dev.internal:8443 web=web.lookahead-dev.internal:8443 cognito=us-east-2
+```
+
+The request bracket appears only on lines written while a browser request runs (the `requestId` MDC value `RequestLog`
+sets); startup, health and shutdown lines end after the sentence. A stack trace follows the line only for ERROR lines.
+
+**Levels.** INFO is normal progress. WARN is an expected refusal: wrong password, limit hit, CSRF, DEV gate, waiting
+account, a 4xx answer from Domain or Cognito, an unreadable upstream answer. ERROR is something an operator must act on:
+an upstream (Domain, Web, Identity, Cognito, DynamoDB) that gave no answer or answered 5xx, an AWS call refused with 403,
+`AccessDeniedException`, `UnrecognizedClientException`, `InvalidSignatureException`, `ResourceNotFoundException` or
+`ExpiredTokenException`, or a failure that escaped everything else (`UNEXPECTED_ERROR`). An AWS throttle
+(`TooManyRequestsException`, `ThrottlingException`, 429) is a limit, so it stays INFO on the upstream line and WARN on the
+`lookahead.limit` line. The word `ERROR` appears only as the level of ERROR lines; WARN and INFO sentences never contain it
+(the tests forbid it), because the deploy's log scan treats it as a failed start.
+
+**ERROR lines answer five questions in one sentence**: what was being done (the request method and path, or "Outside a
+request"), which dependency and operation failed (service, operation, host or table/pool/app client), why (the exception
+type and the dependency's own message, the HTTP status, the AWS error code and request id), what the browser got (status and
+code), and where the stack trace is (`reference <request id>`, the same id the browser is told to quote). A hint closes the
+line where the code knows the cause: a connect failure to Cognito or DynamoDB names the VPC endpoint and its security group;
+one to Domain, Web or Identity names the task, its Cloud Map entry and its security group; a read timeout, an unresolved
+host, a TLS handshake, missing task-role credentials, a denied permission and a missing table or pool each have their own.
+The line is written once, at the end of the request, by `RequestLog`, which is where the answer is known; it replaces that
+request's summary line. A request that swallowed the failure and still answered reads `GET /x -> 200 in 50 ms, but upstream
+… gave no answer …; the request was answered without it`. When Domain answered 5xx and its body (relayed to the browser)
+carried a `reference`, the Gateway line carries that same reference, so one CloudWatch search finds Domain's ERROR line and
+the Gateway's.
+
+**What is quoted.** On ERROR lines the dependency's exception message is quoted (the deepest cause with a message, since
+Spring's and the SDK's wrappers repeat the URL): IAM denials name the role and the action, SDK messages name the endpoint.
+`OpsLog.safe` first makes it one line of at most 400 characters and masks query strings, `Bearer`/`Basic` credentials,
+`Authorization`/`Cookie`/`X-LookAhead-*` header values, `password=`/`secret=`/`token=`/`session=`-shaped values and email
+addresses. WARN and INFO lines never quote a message: exception types and stable codes only. Request bodies, headers, cookies
+and query strings are never read for the log.
+
+**Searching in CloudWatch** (Log Insights or the console filter box, both are substring searches):
+
+| To find | Search for |
+| --- | --- |
+| Everything one request did | `[request 5e17c0aa]` (the first 8 characters of the `X-Request-Id` the browser received) |
+| What went wrong | `ERROR` (then the `reference` on that line, which equals the full request id) |
+| A refusal and why | the code: `INVALID_CREDENTIALS`, `REQUEST_REJECTED`, `DEV_ADMISSION_REQUIRED`, `TOO_MANY_REQUESTS` |
+| One route | its path: `/bff/api/v1/auth/password/sign-in` |
+| Upstream health | `Upstream domain`, `Upstream cognito`, `gave no answer`, `answered 503` |
+| Why a task stopped serving | `Readiness changed`, `Health check`, `Container health check`, `Startup refused`, `Stopping:` |
+| A Domain failure from the Gateway side | the Domain `reference` id, present on both services' lines |
+
+The structured keys (`event.action`, `reason`, `upstream.service`, …) are still attached to every event and asserted by the
+tests (`LogCapture.pairs`), so a log pipeline could render them again, but the console pattern does not print them: every
+sentence names its own code and actor. The deploy's log scan (`deployment/dev/deploy-config.json` `logFailurePatterns`:
+`ERROR`, `startup denied`, `AccessDeniedException`, `Unable to create tempDir`) keeps working: the level word is the first
+word after the timestamp, `AccessDeniedException` is quoted on the ERROR line of a denied AWS call, and the two fixed phrases
+are unchanged. Tests: `PlainLogLineTest` (the real pattern renders exact lines), `RequestLogTest` and `OpsLogTest` (ERROR
+sentences, masking, the request bracket and the stack trace), `ContainerHealthcheckTest` (the probe's plain line).
 
 ## SAST gate diagnostics
 
@@ -368,7 +441,8 @@ On October 9, 2026, the pinned AMD64 candidates passed complete base/final
 package scans and the isolated three-application Local authentication contract
 with fresh synthetic PostgreSQL databases. All applications ran as 10001:10001
 with a read-only root filesystem, capped temporary storage and healthy Java
-readiness probes. This does not certify Cognito or RDS connectivity in AWS.
+readiness probes. That proof did not certify Cognito connectivity in AWS; its PostgreSQL
+databases have since been retired (DLV-970, 2026-11-17: the Domain stores in DynamoDB only).
 
 When a SAST exception is not exercised, the gate writes and prints bounded finding
 metadata and `unusedSastExceptions` before failing. Review the exact rule/file

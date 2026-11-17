@@ -96,7 +96,7 @@ public class IdentityProxyController {
             if (bytes.length > maxBytes) {
                 OpsLog.failed("identity.proxy", "IDENTITY_ANSWER_TOO_LARGE").addKeyValue("upstream.service", "identity")
                         .addKeyValue("upstream.status", received.getStatusCode().value()).addKeyValue("url.path", RequestLog.path(request))
-                        .log("Identity answer for {} {} refused with 502: larger than {} bytes", RequestLog.method(request), RequestLog.path(request), maxBytes);
+                        .log("Identity answer for {} {} refused with 502: IDENTITY_ANSWER_TOO_LARGE (larger than {} bytes)", RequestLog.method(request), RequestLog.path(request), maxBytes);
                 return empty(502);
             }
             var headers = new HttpHeaders();

@@ -33,19 +33,18 @@ public final class InjectedCredentialValidator {
         // The variable(s) being checked, for the refusal line; the pair checks name their part through Invalid.part.
         Map<String, String> parts = Map.of("value", "service");
         try {
-            if (!Set.of("gateway", "domain").contains(service)) throw invalid("UNKNOWN_SERVICE");
+            if (!"gateway".equals(service)) throw invalid("UNKNOWN_SERVICE"); // the Domain validates its own credentials; PostgreSQL retired 2026-11-17
             parts = Map.of("value", "LOOKAHEAD_TLS_SCHEMA");
             String schema = input.get("LOOKAHEAD_TLS_SCHEMA");
             if (!"lookahead-tls/v1".equals(schema)) throw invalid(schema == null ? "MISSING" : "UNSUPPORTED_SCHEMA");
             String certificate = input.get("LOOKAHEAD_TLS_SERVER_CERTIFICATE");
             String key = input.get("LOOKAHEAD_TLS_SERVER_KEY");
             String trust = input.get("LOOKAHEAD_TLS_TRUST");
-            String serverTrust = service.equals("gateway") ? "the JVM default trust store" : "LOOKAHEAD_TLS_TRUST";
+            String serverTrust = "the JVM default trust store";
             parts = Map.of("certificate", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "key", "LOOKAHEAD_TLS_SERVER_KEY",
                     "name", "LOOKAHEAD_TLS_SERVER_NAME", "trust", serverTrust,
                     "chain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE (its chain to " + serverTrust + ")");
-            validatePair(certificate, key, service.equals("gateway") ? null : trust,
-                    input.get("LOOKAHEAD_TLS_SERVER_NAME"), false);
+            validatePair(certificate, key, null, input.get("LOOKAHEAD_TLS_SERVER_NAME"), false);
             parts = Map.of("value", "LOOKAHEAD_TLS_TRUST");
             trustAnchors(trust);
             Map<String, Object> values = new LinkedHashMap<>();
@@ -53,7 +52,7 @@ public final class InjectedCredentialValidator {
             values.put("spring.ssl.bundle.pem.serving.keystore.private-key", key);
             parts = Map.of("value", "LOOKAHEAD_DOMAIN_GATEWAY_SECRET");
             values.put("app.cognito.gateway-secret", scalar(input.get("LOOKAHEAD_DOMAIN_GATEWAY_SECRET")));
-            if (service.equals("gateway")) {
+            {
                 String client = input.get("LOOKAHEAD_TLS_CLIENT_CERTIFICATE");
                 String clientKey = input.get("LOOKAHEAD_TLS_CLIENT_KEY");
                 parts = Map.of("certificate", "LOOKAHEAD_TLS_CLIENT_CERTIFICATE", "key", "LOOKAHEAD_TLS_CLIENT_KEY",
@@ -74,12 +73,6 @@ public final class InjectedCredentialValidator {
                 values.put("app.admission.client-id", clientId(input.get("LOOKAHEAD_ADMISSION_CLIENT_ID")));
                 parts = Map.of("value", "LOOKAHEAD_ADMISSION_CLIENT_SECRET");
                 values.put("app.admission.client-secret", scalar(input.get("LOOKAHEAD_ADMISSION_CLIENT_SECRET")));
-            } else {
-                parts = Map.of("value", "LOOKAHEAD_DOMAIN_DB_PASSWORD");
-                String password = scalar(input.get("LOOKAHEAD_DOMAIN_DB_PASSWORD"));
-                if (!password.matches("[A-Za-z0-9]{48}")) throw invalid("NOT_48_ALPHANUMERIC_CHARACTERS");
-                values.put("spring.datasource.password", password);
-                values.put("spring.ssl.bundle.pem.serving.truststore.certificate", trust);
             }
             return values;
         } catch (Exception rejected) {

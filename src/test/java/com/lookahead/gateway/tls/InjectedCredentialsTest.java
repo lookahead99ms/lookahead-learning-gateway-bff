@@ -75,10 +75,10 @@ class InjectedCredentialsTest {
             Map.entry("LOOKAHEAD_TLS_TRUST",text("ca.pem")),Map.entry("LOOKAHEAD_TLS_CLIENT_CERTIFICATE",text("client.pem")),Map.entry("LOOKAHEAD_TLS_CLIENT_KEY",text("client.key")),
             Map.entry("LOOKAHEAD_DOMAIN_GATEWAY_SECRET","synthetic-gateway-secret"),Map.entry("APP_OAUTH_CLIENT_ID","SyntheticClient1"),
             Map.entry("LOOKAHEAD_GATEWAY_CLIENT_SECRET","synthetic-oauth-secret"),Map.entry("LOOKAHEAD_ADMISSION_CLIENT_ID","SyntheticClient2"),
-            Map.entry("LOOKAHEAD_ADMISSION_CLIENT_SECRET","synthetic-admission-secret"),Map.entry("LOOKAHEAD_DOMAIN_DB_PASSWORD","a".repeat(48))));
+            Map.entry("LOOKAHEAD_ADMISSION_CLIENT_SECRET","synthetic-admission-secret")));
     }
     @Test void positiveBundlesAreConsumedBySpringWithoutFiles() throws Exception {
-        for(String service:List.of("gateway","domain")) {
+        for(String service:List.of("gateway")) {
             var properties=InjectedCredentialValidator.properties(input(), service);
             new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(SslAutoConfiguration.class))
                 .withInitializer(c->c.getEnvironment().getPropertySources().addFirst(new MapPropertySource("synthetic",properties)))
@@ -110,10 +110,8 @@ class InjectedCredentialsTest {
     }
 
     @Test void missingInputsRejectBeforeContextRefreshWithoutLeakingValues() throws Exception {
-        for(String service:List.of("gateway","domain")) {
+        for(String service:List.of("gateway")) {
             var keys=new ArrayList<>(input().keySet());
-            if(service.equals("domain"))keys.removeAll(List.of("LOOKAHEAD_TLS_CLIENT_CERTIFICATE","LOOKAHEAD_TLS_CLIENT_KEY","APP_OAUTH_CLIENT_ID","LOOKAHEAD_GATEWAY_CLIENT_SECRET","LOOKAHEAD_ADMISSION_CLIENT_ID","LOOKAHEAD_ADMISSION_CLIENT_SECRET"));
-            else keys.remove("LOOKAHEAD_DOMAIN_DB_PASSWORD");
             for(String key:keys) {
                 var values=input();values.remove(key);
                 var failure=assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,service),key);
@@ -124,17 +122,17 @@ class InjectedCredentialsTest {
     @Test void wrongHostnamePurposeKeyAndTrustReject() throws Exception {
         for(var entry:Map.of("LOOKAHEAD_TLS_SERVER_NAME","wrong.example.com","LOOKAHEAD_TLS_SERVER_KEY",text("ca.key"),"LOOKAHEAD_TLS_TRUST",text("server.pem"),"LOOKAHEAD_TLS_SERVER_CERTIFICATE",text("client.pem"),"LOOKAHEAD_TLS_SCHEMA","wrong").entrySet()) {
             var values=input();values.put(entry.getKey(),entry.getValue());
-            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
+            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"gateway"));
         }
         command("req","-x509","-newkey","rsa:2048","-nodes","-keyout","other.key","-out","other.pem","-days","5","-subj","/CN=Untrusted root","-addext","basicConstraints=critical,CA:TRUE");
         var values=input();values.put("LOOKAHEAD_TLS_TRUST",text("other.pem"));
-        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
+        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"gateway"));
     }
     @Test void shortLifetimeExpiredAndWrongClientSubjectReject() throws Exception {
         for(String days:List.of("1","expired","future")) {
             leaf("short", "/CN=dev.example.com", "dev.example.com", "serverAuth", days, "server.key");
             var values=input();values.put("LOOKAHEAD_TLS_SERVER_CERTIFICATE",text("short.pem"));
-            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
+            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"gateway"));
         }
         leaf("extra", "/O=Unexpected/CN=gateway.lookahead-dev.internal", "gateway.lookahead-dev.internal", "clientAuth", "3", "client.key");
         var values=input();values.put("LOOKAHEAD_TLS_CLIENT_CERTIFICATE",text("extra.pem"));
@@ -143,9 +141,9 @@ class InjectedCredentialsTest {
     @Test void wrongExtendedUsageAndUnsupportedKeyFormatRejectIndependently() throws Exception {
         leaf("purpose", "/CN=dev.example.com", "dev.example.com", "clientAuth", "3", "server.key");
         var values=input();values.put("LOOKAHEAD_TLS_SERVER_CERTIFICATE",text("purpose.pem"));
-        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
+        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"gateway"));
         var badKey=input();badKey.put("LOOKAHEAD_TLS_SERVER_KEY","-----BEGIN RSA PRIVATE KEY-----\ninvalid");
-        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(badKey,"domain"));
+        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(badKey,"gateway"));
     }
 
     @Test void privateKeyEnvelopeMustBeCompleteAndContainOnlyOnePkcs8Key() throws Exception {
@@ -157,7 +155,7 @@ class InjectedCredentialsTest {
                 key.replaceFirst("\\R", ""), key + key, key + "trailing-source", "prefix" + key)) {
             var values = input(); values.put("LOOKAHEAD_TLS_SERVER_KEY", invalid);
             var failure = assertThrows(IllegalStateException.class,
-                    () -> InjectedCredentialValidator.properties(values, "domain"));
+                    () -> InjectedCredentialValidator.properties(values, "gateway"));
             assertEquals("Injected credential validation failed; application startup denied", failure.getMessage());
             assertNull(failure.getCause());
         }
@@ -173,15 +171,15 @@ class InjectedCredentialsTest {
     @Test void scalarAndMalformedPemBoundaries() throws Exception {
         for(String scalar:List.of("short","a".repeat(4097),"synthetic-secret\nvalue")) {
             var values=input();values.put("LOOKAHEAD_DOMAIN_GATEWAY_SECRET",scalar);
-            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
+            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"gateway"));
         }
         for(String pem:List.of("", "file:/tmp/forbidden", "x".repeat(65537), text("server.pem").repeat(9))) {
             var values=input();values.put("LOOKAHEAD_TLS_SERVER_CERTIFICATE",pem);
-            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
+            assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"gateway"));
         }
         for(String id:List.of("invalid-id","a".repeat(129)))assertThrows(IllegalArgumentException.class,()->InjectedCredentialValidator.clientId(id));
-        var values=input();values.put("LOOKAHEAD_DOMAIN_DB_PASSWORD","wrongshape-but-long-enough");
-        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain"));
+        var values=input();
+        assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"domain")); // the Domain validates its own credentials (PostgreSQL retired 2026-11-17)
         assertThrows(IllegalStateException.class,()->InjectedCredentialValidator.properties(values,"web"));
     }
 
@@ -208,11 +206,8 @@ class InjectedCredentialsTest {
     }
 
     @Test void everyMissingInputIsNamed() throws Exception {
-        for (String service : List.of("gateway", "domain")) {
+        for (String service : List.of("gateway")) {
             var keys = new ArrayList<>(input().keySet());
-            if (service.equals("domain")) keys.removeAll(List.of("LOOKAHEAD_TLS_CLIENT_CERTIFICATE", "LOOKAHEAD_TLS_CLIENT_KEY", "APP_OAUTH_CLIENT_ID",
-                    "LOOKAHEAD_GATEWAY_CLIENT_SECRET", "LOOKAHEAD_ADMISSION_CLIENT_ID", "LOOKAHEAD_ADMISSION_CLIENT_SECRET"));
-            else keys.remove("LOOKAHEAD_DOMAIN_DB_PASSWORD");
             for (String key : keys) {
                 var values = input(); values.remove(key);
                 assertEquals(List.of("injected credential " + key, "MISSING"), refusal(values, service), service + " " + key);
@@ -228,24 +223,22 @@ class InjectedCredentialsTest {
         leaf("short", "/CN=dev.example.com", "dev.example.com", "serverAuth", "1", "server.key");
         var cases = List.of(
             new Case("LOOKAHEAD_TLS_SCHEMA", "lookahead-tls/v0", "gateway", "LOOKAHEAD_TLS_SCHEMA", "UNSUPPORTED_SCHEMA"),
-            new Case("LOOKAHEAD_TLS_SERVER_NAME", "wrong.example.com", "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "NAME_NOT_IN_SUBJECT_ALTERNATIVE_NAMES"),
-            new Case("LOOKAHEAD_TLS_SERVER_NAME", "Not A Name", "domain", "LOOKAHEAD_TLS_SERVER_NAME", "NOT_A_LOWER_CASE_HOST_NAME"),
-            new Case("LOOKAHEAD_TLS_SERVER_KEY", text("ca.key"), "domain", "LOOKAHEAD_TLS_SERVER_KEY", "KEY_DOES_NOT_MATCH_CERTIFICATE"),
-            new Case("LOOKAHEAD_TLS_SERVER_KEY", text("client.key"), "domain", "LOOKAHEAD_TLS_SERVER_KEY", "KEY_UNREADABLE"),
-            new Case("LOOKAHEAD_TLS_SERVER_KEY", "-----BEGIN RSA PRIVATE KEY-----\ninvalid", "domain", "LOOKAHEAD_TLS_SERVER_KEY", "NOT_ONE_PKCS8_PEM_BLOCK"),
-            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("ca.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "LEAF_IS_A_CA_CERTIFICATE"),
-            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("purpose.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "NOT_FOR_SERVER_AUTHENTICATION"),
-            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("short.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "EXPIRES_WITHIN_ONE_DAY"),
-            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", "file:/tmp/forbidden", "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "CERTIFICATE_UNREADABLE"),
-            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", "x".repeat(65537), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "LONGER_THAN_64_KB"),
-            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("server.pem").repeat(9), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "MORE_THAN_8_CERTIFICATES"),
-            new Case("LOOKAHEAD_TLS_TRUST", text("server.pem"), "domain", "LOOKAHEAD_TLS_TRUST", "NOT_A_SELF_SIGNED_CA"),
-            new Case("LOOKAHEAD_TLS_TRUST", text("other.pem"), "domain", "LOOKAHEAD_TLS_SERVER_CERTIFICATE (its chain to LOOKAHEAD_TLS_TRUST)", "CHAIN_NOT_TRUSTED"),
+            new Case("LOOKAHEAD_TLS_SERVER_NAME", "wrong.example.com", "gateway", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "NAME_NOT_IN_SUBJECT_ALTERNATIVE_NAMES"),
+            new Case("LOOKAHEAD_TLS_SERVER_NAME", "Not A Name", "gateway", "LOOKAHEAD_TLS_SERVER_NAME", "NOT_A_LOWER_CASE_HOST_NAME"),
+            new Case("LOOKAHEAD_TLS_SERVER_KEY", text("ca.key"), "gateway", "LOOKAHEAD_TLS_SERVER_KEY", "KEY_DOES_NOT_MATCH_CERTIFICATE"),
+            new Case("LOOKAHEAD_TLS_SERVER_KEY", text("client.key"), "gateway", "LOOKAHEAD_TLS_SERVER_KEY", "KEY_UNREADABLE"),
+            new Case("LOOKAHEAD_TLS_SERVER_KEY", "-----BEGIN RSA PRIVATE KEY-----\ninvalid", "gateway", "LOOKAHEAD_TLS_SERVER_KEY", "NOT_ONE_PKCS8_PEM_BLOCK"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("ca.pem"), "gateway", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "LEAF_IS_A_CA_CERTIFICATE"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("purpose.pem"), "gateway", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "NOT_FOR_SERVER_AUTHENTICATION"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("short.pem"), "gateway", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "EXPIRES_WITHIN_ONE_DAY"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", "file:/tmp/forbidden", "gateway", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "CERTIFICATE_UNREADABLE"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", "x".repeat(65537), "gateway", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "LONGER_THAN_64_KB"),
+            new Case("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("server.pem").repeat(9), "gateway", "LOOKAHEAD_TLS_SERVER_CERTIFICATE", "MORE_THAN_8_CERTIFICATES"),
+            new Case("LOOKAHEAD_TLS_TRUST", text("server.pem"), "gateway", "LOOKAHEAD_TLS_TRUST", "NOT_A_SELF_SIGNED_CA"),
             new Case("LOOKAHEAD_TLS_TRUST", text("other.pem"), "gateway", "LOOKAHEAD_TLS_CLIENT_CERTIFICATE (its chain to LOOKAHEAD_TLS_TRUST)", "CHAIN_NOT_TRUSTED"),
-            new Case("LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "short", "domain", "LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "LENGTH_OUTSIDE_16_TO_4096"),
-            new Case("LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "synthetic-secret\nvalue", "domain", "LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "CONTROL_CHARACTERS"),
-            new Case("APP_OAUTH_CLIENT_ID", "invalid-id", "gateway", "APP_OAUTH_CLIENT_ID", "NOT_1_TO_128_ALPHANUMERIC_CHARACTERS"),
-            new Case("LOOKAHEAD_DOMAIN_DB_PASSWORD", "wrongshape-but-long-enough", "domain", "LOOKAHEAD_DOMAIN_DB_PASSWORD", "NOT_48_ALPHANUMERIC_CHARACTERS"));
+            new Case("LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "short", "gateway", "LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "LENGTH_OUTSIDE_16_TO_4096"),
+            new Case("LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "synthetic-secret\nvalue", "gateway", "LOOKAHEAD_DOMAIN_GATEWAY_SECRET", "CONTROL_CHARACTERS"),
+            new Case("APP_OAUTH_CLIENT_ID", "invalid-id", "gateway", "APP_OAUTH_CLIENT_ID", "NOT_1_TO_128_ALPHANUMERIC_CHARACTERS"));
         for (var test : cases) {
             var values = input(); values.put(test.key(), test.value());
             assertEquals(List.of("injected credential " + test.setting(), test.reason()), refusal(values, test.service()), test.toString().substring(0, 80));
@@ -261,7 +254,7 @@ class InjectedCredentialsTest {
             leaf("dated", "/CN=dev.example.com", "dev.example.com", "serverAuth", days, "server.key");
             var dated = input(); dated.put("LOOKAHEAD_TLS_SERVER_CERTIFICATE", text("dated.pem"));
             assertEquals(List.of("injected credential LOOKAHEAD_TLS_SERVER_CERTIFICATE", days.equals("expired") ? "CERTIFICATE_EXPIRED" : "CERTIFICATE_NOT_YET_VALID"),
-                    refusal(dated, "domain"));
+                    refusal(dated, "gateway"));
         }
     }
 

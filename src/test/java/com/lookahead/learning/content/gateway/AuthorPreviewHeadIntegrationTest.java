@@ -196,8 +196,7 @@ class AuthorPreviewHeadIntegrationTest {
 
     @Configuration
     @EnableAutoConfiguration(excludeName = {
-            "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
-            "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"})
+            "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"})
     @Import(TestApplication.class)
     static class TransportApplication {
         /** Test-only identity fixture; all real gateway security filters and response writers still run. */

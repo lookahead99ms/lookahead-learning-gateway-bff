@@ -64,11 +64,11 @@ class FallbackReasonLogTest {
         var sessions = new CloudGatewaySessions(settings, builder.build());
         assertThatThrownBy(() -> sessions.call("admit", TOKEN, new MockHttpServletRequest(), Map.of())).isInstanceOf(RestClientException.class);
         reason("cloud-session.admit", "ANSWER_NOT_JSON");
-        assertThat(log.last().getFormattedMessage()).startsWith("Domain's answer to cloud sign-in admit (HTTP 200) was unreadable: not JSON (");
+        assertThat(log.last().getFormattedMessage()).startsWith("Domain's answer to cloud sign-in admit (HTTP 200) was unreadable: ANSWER_NOT_JSON (not JSON: ");
         assertThat(LogCapture.pairs(log.last())).contains("upstream.service=domain", "upstream.status=200");
         assertThatThrownBy(() -> sessions.call("admit", TOKEN, new MockHttpServletRequest(), Map.of())).isInstanceOf(RestClientException.class);
         reason("cloud-session.admit", "ANSWER_TOO_LARGE");
-        assertThat(log.last().getFormattedMessage()).isEqualTo("Domain's answer to cloud sign-in admit (HTTP 502) was unreadable: larger than 16 KB");
+        assertThat(log.last().getFormattedMessage()).isEqualTo("Domain's answer to cloud sign-in admit (HTTP 502) was unreadable: ANSWER_TOO_LARGE (larger than 16 KB)");
         server.verify();
     }
 
@@ -83,8 +83,8 @@ class FallbackReasonLogTest {
         var proxy = new DevWebProxy(builder.build(), environment);
         assertThat(proxy.get(new MockHttpServletRequest("GET", "/learn")).getStatusCode().value()).isEqualTo(502);
         reason("web.proxy", "WEB_REDIRECT_REFUSED");
-        assertThat(log.last().getFormattedMessage()).isEqualTo("Web answer for GET /learn refused with 502: Web answered a redirect (HTTP 302), "
-                + "which the Gateway never follows or relays");
+        assertThat(log.last().getFormattedMessage()).isEqualTo("Web answer for GET /learn refused with 502: WEB_REDIRECT_REFUSED (Web answered a redirect (HTTP 302), "
+                + "which the Gateway never follows or relays)");
         assertThat(proxy.get(new MockHttpServletRequest("GET", "/learn")).getStatusCode().value()).isEqualTo(502);
         reason("web.proxy", "WEB_ANSWER_TOO_LARGE");
         assertThat(LogCapture.pairs(log.last())).contains("upstream.status=200", "url.path=/learn");
@@ -101,10 +101,10 @@ class FallbackReasonLogTest {
         server.expect(requestTo("http://identity:8080/api/v1/account/sign-ins/label")).andRespond(withSuccess(SECRET + " is not json", MediaType.APPLICATION_JSON));
         assertThat(account.profile(new MockHttpServletRequest("GET", "/api/v1/account/profile")).getStatusCode().value()).isEqualTo(503);
         reason("identity.proxy", "IDENTITY_ANSWER_TOO_LARGE");
-        assertThat(log.last().getFormattedMessage()).isEqualTo("Identity answer for GET /api/v1/account/profile refused with 502: larger than 8192 bytes");
+        assertThat(log.last().getFormattedMessage()).isEqualTo("Identity answer for GET /api/v1/account/profile refused with 502: IDENTITY_ANSWER_TOO_LARGE (larger than 8192 bytes)");
         assertThat(account.updateSignIns(new MockHttpServletRequest("POST", "/api/v1/account/sign-ins/label")).getStatusCode().value()).isEqualTo(503);
         reason("account.identity", "IDENTITY_ANSWER_NOT_JSON");
-        assertThat(log.last().getFormattedMessage()).startsWith("Identity's answer to POST /api/v1/account/sign-ins/label was not readable JSON (");
+        assertThat(log.last().getFormattedMessage()).startsWith("Identity's answer to POST /api/v1/account/sign-ins/label was unusable: IDENTITY_ANSWER_NOT_JSON (not readable JSON: ");
         server.verify();
     }
 

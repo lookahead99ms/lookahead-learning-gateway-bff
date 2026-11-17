@@ -47,7 +47,7 @@ class DevRuntimeBehaviorTest {
         assertTrue(old.isInvalid()); assertNull(SecurityContextHolder.getContext().getAuthentication());
         assertNotNull(request.getSession().getAttribute(DevAdmission.ATTRIBUTE));
         assertNull(request.getSession().getAttribute(TestSessionController.STAFF_SIGN_IN));
-        assertEquals("Signed out after 30 idle minutes: the test session ended with the staff sign-in kept aside, the DEV gate stays open",capture.list.get(0).getFormattedMessage());
+        assertEquals("Signed out: IDLE_TIMEOUT (no activity for 30 minutes); the test session ended with the staff sign-in kept aside, the DEV gate stays open",capture.list.get(0).getFormattedMessage());
     }
     /** DLV-971: a test session's requests refresh the stamp, so Back to my account does not meet an idle sign-out. */
     @Test void aTestSessionRequestRefreshesTheActivityStamp() throws Exception {

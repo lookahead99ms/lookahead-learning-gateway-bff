@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 final class StatusReason extends HttpServletResponseWrapper {
     static final int LIMIT = 4096;
     private static final Pattern CODE = Pattern.compile("\"code\"\\s*:\\s*\"([A-Za-z0-9_.\\-]{1,80})\"");
+    private static final Pattern REFERENCE = Pattern.compile("\"reference\"\\s*:\\s*\"([A-Za-z0-9-]{4,64})\"");
     private static final Pattern WORDS = Pattern.compile("\"(?:message|detail|error_description|title)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.){1,300})\"");
     private static final Pattern EMAIL = Pattern.compile("[^\\s@\"'<>]+@[^\\s@\"'<>]+\\.[A-Za-z]{2,}");
     private static final Map<Integer, String> STATUS = Map.ofEntries(
@@ -37,7 +38,7 @@ final class StatusReason extends HttpServletResponseWrapper {
             Map.entry(415, "Unsupported content type"),
             Map.entry(422, "Understood but rejected: the content broke a rule"),
             Map.entry(429, "Too many requests: a rate limit was reached"),
-            Map.entry(500, "Unexpected server failure: see the ERROR line with the same requestId"),
+            Map.entry(500, "Unexpected server failure: see the failure line with the same request id"),
             Map.entry(501, "Not implemented: this action is not available in this environment"),
             Map.entry(502, "Bad gateway: a service behind this one gave an invalid answer"),
             Map.entry(503, "Unavailable: a service this request needs is down or busy"),
@@ -60,6 +61,9 @@ final class StatusReason extends HttpServletResponseWrapper {
         if (words == null || words.isBlank()) words = STATUS.getOrDefault(status, "HTTP " + status);
         return new Reason(code != null ? code : "HTTP_" + status, mask(words.replace("\\\"", "\"").replaceAll("[\\r\\n\\t]", " ")));
     }
+
+    /** The {@code reference} a failure answer carried (ours, or an upstream's relayed by a proxy route), or null. */
+    String reference() { return getStatus() < 400 ? null : find(REFERENCE, seen); }
 
     static String describe(int status) { return STATUS.getOrDefault(status, "HTTP " + status); }
 

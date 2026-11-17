@@ -28,6 +28,9 @@ import org.springframework.stereotype.Component;
  *   upstreams are configured (host names and ports only: never a path, query, user or password).</li>
  *   <li>One line when the context closes: shutdown requested, uptime and the readiness it had until then.</li>
  * </ul>
+ * Plain logs (2026-11-17): each sentence names its reason code ({@code MARKED_REFUSING_TRAFFIC}, {@code SHUTTING_DOWN},
+ * {@code LIVENESS_BROKEN}, {@code LIVENESS_CORRECT}) and the summary says the deployment environment and liveness, since
+ * the keys are not rendered.
  */
 @Component
 public class LifecycleLog {
@@ -93,7 +96,7 @@ public class LifecycleLog {
         }
         line.addKeyValue("event.action", "availability.readiness").addKeyValue("readiness.state", state.name())
                 .addKeyValue("readiness.previous", previous == null ? "NONE" : previous.name()).addKeyValue("reason", reason)
-                .log("Readiness changed to {} (was {}): {}", state, previous == null ? "not reported" : previous, words);
+                .log("Readiness changed to {} (was {}): {} ({})", state, previous == null ? "not reported" : previous, reason, words);
         if (state == ReadinessState.ACCEPTING_TRAFFIC && summarized.compareAndSet(false, true)) summary();
     }
 
@@ -105,8 +108,8 @@ public class LifecycleLog {
         (broken ? LIFECYCLE.atWarn() : LIFECYCLE.atInfo()).addKeyValue("event.action", "availability.liveness")
                 .addKeyValue("liveness.state", state.name()).addKeyValue("liveness.previous", previous == null ? "NONE" : previous.name())
                 .addKeyValue("reason", broken ? "LIVENESS_BROKEN" : "LIVENESS_CORRECT")
-                .log(broken ? "Liveness changed to BROKEN (was {}): marked by {}; /actuator/health/liveness answers 503"
-                        : "Liveness changed to CORRECT (was {}): the application is running", previous == null ? "not reported" : previous, type(source));
+                .log(broken ? "Liveness changed to BROKEN (was {}): LIVENESS_BROKEN (marked by {}; /actuator/health/liveness answers 503)"
+                        : "Liveness changed to CORRECT (was {}): LIVENESS_CORRECT (the application is running)", previous == null ? "not reported" : previous, type(source));
     }
 
     /** The startup summary: what is running, where it listens and which upstreams it was given. */
@@ -123,8 +126,9 @@ public class LifecycleLog {
                 .addKeyValue("profiles", profiles).addKeyValue("deployment.environment", value(property("app.deployment-environment")))
                 .addKeyValue("readiness.state", String.valueOf(readiness)).addKeyValue("liveness.state", String.valueOf(liveness))
                 .addKeyValue("server.port", value(port)).addKeyValue("management.port", value(management)).addKeyValue("upstreams", upstreams)
-                .log("Started and ready: Gateway {} (release {}, commit {}), profiles [{}], readiness {}, port {}, management port {}, upstreams {}",
-                        version, tag, revision, profiles, readiness, value(port), management == null ? "same as server" : management, upstreams);
+                .log("Started and ready: Gateway {} (release {}, commit {}), profiles [{}], environment {}, readiness {}, liveness {}, port {}, management port {}, upstreams {}",
+                        version, tag, revision, profiles, value(property("app.deployment-environment")), readiness, liveness == null ? "not reported" : liveness,
+                        value(port), management == null ? "same as server" : management, upstreams);
     }
 
     @EventListener

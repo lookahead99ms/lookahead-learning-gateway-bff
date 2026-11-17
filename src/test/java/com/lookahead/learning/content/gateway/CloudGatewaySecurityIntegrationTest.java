@@ -117,7 +117,7 @@ class CloudGatewaySecurityIntegrationTest {
             assertThat(line.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
             assertThat(line.getFormattedMessage()).doesNotContain(other).doesNotContain("Exception");
         });
-        assertThat(capture.list.get(0).getFormattedMessage()).isEqualTo("Request rejected with REQUEST_REJECTED: POST /api/v1/account/profile (no CSRF token was sent, or it does not match this session's)");
+        assertThat(capture.list.get(0).getFormattedMessage()).isEqualTo("Request rejected with REQUEST_REJECTED: POST /api/v1/account/profile: CSRF_TOKEN_MISMATCH (no CSRF token was sent, or it does not match this session's)");
         assertThat(capture.list).allSatisfy(line->assertThat(OpsLogTest.pairs(line)).contains("event.action=request.rejected","reason=CSRF_TOKEN_MISMATCH"));
         assertThat(GatewaySecurityHandlers.rejection(new org.springframework.security.web.csrf.MissingCsrfTokenException(null))).isEqualTo("CSRF_NO_SESSION_TOKEN");
         assertThat(GatewaySecurityHandlers.rejection(new org.springframework.security.web.csrf.CsrfException("x"))).isEqualTo("CSRF_REJECTED");
@@ -325,7 +325,8 @@ class CloudGatewaySecurityIntegrationTest {
                 new org.springframework.security.oauth2.core.OAuth2Error("invalid_state_parameter","synthetic description",null)));
         } finally {events.detachAppender(capture);}
         assertThat(capture.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
-            .containsExactly("OAuth sign-in failed at the callback: authentication_failed","OAuth sign-in failed at the callback: invalid_state_parameter");
+            .containsExactly("OAuth sign-in failed at the callback (via oauth): OAUTH_AUTHENTICATION_FAILED (the provider or the callback check answered authentication_failed; BadCredentialsException)",
+                "OAuth sign-in failed at the callback (via oauth): OAUTH_INVALID_STATE_PARAMETER (the provider or the callback check answered invalid_state_parameter; OAuth2AuthenticationException)");
         assertThat(OpsLogTest.pairs(capture.list.getLast())).contains("reason=OAUTH_INVALID_STATE_PARAMETER");
         assertThat(outsideResponse.getRedirectedUrl()).isEqualTo(settings.frontend()+"/dev/access?error=signin");
         var inside=new MockHttpServletRequest();inside.getSession().setAttribute(DevAdmission.ATTRIBUTE,earlier);var insideResponse=new MockHttpServletResponse();
@@ -375,7 +376,7 @@ class CloudGatewaySecurityIntegrationTest {
             assertThat(completed.getFormattedMessage().endsWith(" and other accounts share its verified email (merge offered)")).as(c.admit()).isEqualTo(offered);
             var offers=logged.list.stream().filter(l->OpsLogTest.pairs(l).contains("event.action=sign-in.merge-offer")).toList();
             assertThat(offers).as(c.admit()).hasSize(offered?1:0);
-            if(offered)assertThat(offers.getFirst().getFormattedMessage()).isEqualTo("Sign-in completed and other accounts share this person's verified email: redirected to the merge offer page");
+            if(offered)assertThat(offers.getFirst().getFormattedMessage()).startsWith("Sign-in completed (").endsWith(" via oauth) and other accounts share this person's verified email: redirected to the merge offer page");
             assertThat(logged.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).noneMatch(m->m.contains(token));
         }
     }

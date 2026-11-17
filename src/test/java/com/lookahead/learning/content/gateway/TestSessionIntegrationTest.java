@@ -142,7 +142,7 @@ class TestSessionIntegrationTest {
         var out=mvc.perform(post("/bff/api/v1/auth/logout").session(session).header("X-CSRF-TOKEN",csrf(session)))
             .andExpect(status().isOk()).andExpect(jsonPath("data.logoutUrl").value("https://learn.example.test/sign-in")).andReturn();
         var fresh=(MockHttpSession)out.getRequest().getSession(false);
-        assertThat(said()).contains("Test session started while signed out: now using test account "+LEARNER,"Signed out of test account "+LEARNER+"; the DEV gate stays open");
+        assertThat(said()).contains("Test session started while signed out: now using test account "+LEARNER,"Signed out of test account "+LEARNER+" (kind test-session); the DEV gate stays open");
         assertThat(fresh).isNotNull();assertThat(fresh.getAttribute(DevAdmission.ATTRIBUTE)).isNotNull();
         assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
         mvc.perform(get("/bff/api/v1/auth/me").session(fresh)).andExpect(status().isUnauthorized());
@@ -182,7 +182,7 @@ class TestSessionIntegrationTest {
         mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
             .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("code").value("SERVICE_UNAVAILABLE"));
         assertThat(said()).contains("Test session request refused: HTTP_503 (the test-session service was unavailable, HTTP 503)",
-            "Test session request could not reach Domain (ResourceAccessException < IOException)");
+            "Test session request could not reach Domain: DOMAIN_UNAVAILABLE (ResourceAccessException < IOException); answered 503");
     }
 
     static final String SECOND = "7d1c0b9a-2e3f-4a5b-9c8d-1e2f3a4b5c6d";
@@ -338,6 +338,6 @@ class TestSessionIntegrationTest {
         assertThat(fresh.getAttribute(TestSessionController.STAFF_SIGN_IN)).isNull();
         assertThat(fresh.getAttribute(DevAdmission.ATTRIBUTE)).isNotNull();
         fixture.server.verify();
-        assertThat(said()).contains("Signed out of test account "+LEARNER+" and of the staff sign-in kept behind it");
+        assertThat(said()).contains("Signed out of test account "+LEARNER+" and of the staff sign-in kept behind it (kind test-session-and-staff)");
     }
 }

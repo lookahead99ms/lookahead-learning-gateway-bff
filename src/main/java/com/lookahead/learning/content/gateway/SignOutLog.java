@@ -37,18 +37,18 @@ public final class SignOutLog extends OncePerRequestFilter {
         if (status >= 400) {
             (status >= 500 ? OpsLog.failed("sign-out", status == 503 ? "SERVICE_UNAVAILABLE" : "HTTP_" + status)
                     : OpsLog.refused("sign-out", "HTTP_" + status)).addKeyValue("signOut.kind", kind).addKeyValue("http.status", status)
-                    .log("Sign out did not complete: HTTP {} ({})", status, status >= 500
+                    .log("Sign out (kind {}) did not complete: HTTP {} ({})", kind, status, status >= 500
                             ? "Domain could not confirm the sign-out; the person stays signed in and can retry" : "refused");
             return;
         }
         var line = OpsLog.success("sign-out").addKeyValue("signOut.kind", kind);
         switch (kind) {
             case "test-session" -> line.addKeyValue("testAccount.id", before.getName())
-                    .log("Signed out of test account {}; the DEV gate stays open", before.getName());
+                    .log("Signed out of test account {} (kind test-session); the DEV gate stays open", before.getName());
             case "test-session-and-staff" -> line.addKeyValue("testAccount.id", before.getName())
-                    .log("Signed out of test account {} and of the staff sign-in kept behind it", before.getName());
-            case "sign-in" -> line.log("Signed out: Domain ended the sign-in and the provider tokens were dropped");
-            default -> line.log("Sign out with no sign-in in this session");
+                    .log("Signed out of test account {} and of the staff sign-in kept behind it (kind test-session-and-staff)", before.getName());
+            case "sign-in" -> line.log("Signed out (kind sign-in): Domain ended the sign-in and the provider tokens were dropped");
+            default -> line.log("Sign out with no sign-in in this session (kind none)");
         }
     }
 }

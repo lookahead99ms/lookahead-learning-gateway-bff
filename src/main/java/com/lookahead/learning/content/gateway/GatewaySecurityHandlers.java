@@ -63,7 +63,7 @@ public class GatewaySecurityHandlers {
         // treats that word as a failed start.
         String reason = rejection(error);
         OpsLog.refused("request.rejected", reason).addKeyValue("http.method", RequestLog.method(request)).addKeyValue("url.path", RequestLog.path(request))
-                .log("Request rejected with REQUEST_REJECTED: {} {} ({})", RequestLog.method(request), RequestLog.path(request), REJECTIONS.get(reason));
+                .log("Request rejected with REQUEST_REJECTED: {} {}: {} ({})", RequestLog.method(request), RequestLog.path(request), reason, REJECTIONS.get(reason));
         failure(response, 403, "{\"code\":\"REQUEST_REJECTED\",\"message\":\"Refresh the security token and retry\"}");
     }
 
@@ -101,8 +101,9 @@ public class GatewaySecurityHandlers {
         String next = completeSignIn(request, response, authentication);
         if (mergeAvailable(request)) {
             // DLV-969 S36: the redirect sign-in cannot show the inbox panel, so the browser goes to the merge offer first.
-            OpsLog.success("sign-in.merge-offer").addKeyValue("provider", settings.cloud() ? provider(authentication) : "identity").addKeyValue("via", "oauth")
-                    .log("Sign-in completed and other accounts share this person's verified email: redirected to the merge offer page");
+            String provider = settings.cloud() ? provider(authentication) : "identity";
+            OpsLog.success("sign-in.merge-offer").addKeyValue("provider", provider).addKeyValue("via", "oauth")
+                    .log("Sign-in completed ({} via oauth) and other accounts share this person's verified email: redirected to the merge offer page", provider);
             next = mergeOffer(next);
         }
         response.sendRedirect(settings.frontend() + next);
@@ -225,7 +226,8 @@ public class GatewaySecurityHandlers {
         // token, JWKS or user-info call; never a message.
         OpsLog.refused("sign-in.oauth", "OAUTH_" + code.toUpperCase(java.util.Locale.ROOT)).addKeyValue("oauth.code", code)
                 .addKeyValue("exception.types", RequestLog.types(error))
-                .log("OAuth sign-in failed at the callback: {}", code);
+                .log("OAuth sign-in failed at the callback (via oauth): OAUTH_{} (the provider or the callback check answered {}; {})",
+                        code.toUpperCase(java.util.Locale.ROOT), code, RequestLog.types(error));
         // Outside an open DEV gate the Web sign-in page is unreachable, so the gate page carries the message (DLV-969).
         if (gate.isPresent() && !DevAdmission.open(DevAdmission.current(request), java.time.Instant.now())) {
             response.sendRedirect(settings.frontend() + "/dev/access?error=signin"); return;

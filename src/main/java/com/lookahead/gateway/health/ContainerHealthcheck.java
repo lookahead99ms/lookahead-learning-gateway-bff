@@ -15,6 +15,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,11 +24,16 @@ import java.util.regex.Pattern;
  * Container readiness probe using only the Java runtime already in the image.
  *
  * <p>DLV-969 (owner, 2026-11-04): ECS keeps a failed probe's output to itself, so a task stopped for "failed container
- * health checks" used to leave nothing in CloudWatch. A failed probe now writes one ECS JSON line to the application's
- * own log stream (the stdout of PID 1) saying why: nothing listening, no answer in time, or readiness answering 503 and
- * its status. Once when it starts failing or the reason changes, then at most once a minute while it keeps failing, and
- * once when it passes again; a small state file in {@code /tmp} remembers across probes. Writing the line never changes
- * the exit code.
+ * health checks" used to leave nothing in CloudWatch. A failed probe now writes one line to the application's own log
+ * stream (the stdout of PID 1) saying why: nothing listening, no answer in time, or readiness answering 503 and its
+ * status. Once when it starts failing or the reason changes, then at most once a minute while it keeps failing, and once
+ * when it passes again; a small state file in {@code /tmp} remembers across probes. Writing the line never changes the
+ * exit code.
+ *
+ * <p>Plain logs (owner decision 2026-11-17): the line has the application's own shape, "{@code <UTC timestamp with
+ * millis> <LEVEL padded to 5> <sentence>}", with the reason code, the failures in a row and the seconds down in words.
+ * A failing probe is WARN (the task is not serving yet, or is stopping); the word ERROR never appears, since the deploy's
+ * log scan treats it as a failed start.
  */
 public final class ContainerHealthcheck {
     static final URI READINESS_URI = URI.create("http://127.0.0.1:8080/actuator/health/readiness");
@@ -35,6 +42,8 @@ public final class ContainerHealthcheck {
     static final Path STATE = Path.of("/tmp/lookahead-healthcheck.state");
     static final Path APPLICATION_LOG = Path.of("/proc/1/fd/1");
     static final Duration REPEAT = Duration.ofMinutes(1);
+    /** The same timestamp shape as the application's console pattern: {@code 2026-11-17T20:41:18.144Z}. */
+    static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSX").withZone(ZoneOffset.UTC);
     private static final Pattern STATUS = Pattern.compile("\"status\"\\s*:\\s*\"([A-Z_]{1,32})\"");
 
     private ContainerHealthcheck() {
@@ -43,7 +52,7 @@ public final class ContainerHealthcheck {
     public static void main(String[] args) {
         URI uri = readinessUri(System.getenv("LOOKAHEAD_RUNTIME_MODE"));
         Result result = probe(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), uri);
-        report(result, uri, STATE, ContainerHealthcheck::applicationLog, Instant.now(), System.getenv("LOOKAHEAD_ENVIRONMENT"));
+        report(result, uri, STATE, ContainerHealthcheck::applicationLog, Instant.now());
         System.exit(result.code());
     }
 
@@ -108,16 +117,15 @@ public final class ContainerHealthcheck {
      * Writes the line if this probe changes what the last ones said, or a minute has passed while it keeps failing. The
      * state file holds {@code reason firstFailedEpochSecond lastLoggedEpochSecond failures}; it is gone while all is well.
      */
-    static void report(Result result, URI uri, Path state, Sink sink, Instant now, String environment) {
+    static void report(Result result, URI uri, Path state, Sink sink, Instant now) {
         try {
             String[] previous = Files.exists(state) ? Files.readString(state, StandardCharsets.US_ASCII).strip().split(" ") : null;
             if (previous != null && previous.length != 4) previous = null;
             if (result.code() == 0) {
                 if (previous == null) return;
                 long downSeconds = now.getEpochSecond() - Long.parseLong(previous[1]);
-                write(sink, line(now, environment, "INFO", "success", "READY",
-                        "Container health check passed again after " + downSeconds + " s and " + previous[3] + " failed probes (last reason "
-                                + previous[0] + ")", 0, downSeconds));
+                write(sink, line(now, "INFO", "Container health check passed again: READY after " + downSeconds + " s down and " + previous[3]
+                        + " failed " + (previous[3].equals("1") ? "probe" : "probes") + " (last reason " + previous[0] + ")"));
                 Files.deleteIfExists(state);
                 return;
             }
@@ -127,9 +135,9 @@ public final class ContainerHealthcheck {
             long failures = continuing ? Long.parseLong(previous[3]) + 1 : 1;
             boolean due = !continuing || !previous[0].equals(result.reason()) || now.getEpochSecond() - lastLogged >= REPEAT.toSeconds();
             if (due) {
-                write(sink, line(now, environment, "WARN", "failure", result.reason(),
-                        "Container health check failed (" + result.reason() + "): " + result.words() + "; probe " + uri.getHost() + ":" + uri.getPort()
-                                + uri.getPath() + ", " + failures + " failed in a row", failures, now.getEpochSecond() - first));
+                long downSeconds = now.getEpochSecond() - first;
+                write(sink, line(now, "WARN", "Container health check failed: " + result.reason() + " (" + result.words() + "); probe " + uri.getHost() + ":"
+                        + uri.getPort() + uri.getPath() + ", " + failures + " failed in a row, down for " + downSeconds + " s"));
                 lastLogged = now.getEpochSecond();
             }
             Files.writeString(state, result.reason() + " " + first + " " + lastLogged + " " + failures, StandardCharsets.US_ASCII);
@@ -149,23 +157,12 @@ public final class ContainerHealthcheck {
         }
     }
 
-    /** One record in the same shape as the application's ECS lines, so CloudWatch queries on log.level and reason work. */
-    static String line(Instant now, String environment, String level, String outcome, String reason, String message, long failures, long seconds) {
-        return "{\"@timestamp\":\"" + now + "\",\"log\":{\"level\":\"" + level + "\",\"logger\":\"lookahead.lifecycle\"},"
-                + "\"process\":{\"pid\":" + ProcessHandle.current().pid() + ",\"thread\":{\"name\":\"container-healthcheck\"}},"
-                + "\"service\":{\"name\":\"gateway\",\"environment\":\"" + json(environment == null || environment.isBlank() ? "dev" : environment) + "\"},"
-                + "\"message\":\"" + json(message) + "\",\"event\":{\"action\":\"health.container-check\",\"outcome\":\"" + outcome + "\"},"
-                + "\"reason\":\"" + json(reason) + "\",\"failures\":" + failures + ",\"downSeconds\":" + seconds + ",\"ecs\":{\"version\":\"8.11\"}}";
-    }
-
-    static String json(String text) {
-        var out = new StringBuilder(text.length() + 8);
-        for (char c : text.toCharArray()) {
-            if (c == '"' || c == '\\') out.append('\\').append(c);
-            else if (c < 0x20) out.append(String.format("\\u%04x", (int) c));
-            else out.append(c);
-        }
-        return out.toString();
+    /**
+     * One line in the application's own shape, "{@code 2026-11-04T20:00:00.000Z WARN  Container health check failed: …}".
+     * No request bracket: the probe serves no request. Line breaks in the words become spaces so it stays one line.
+     */
+    static String line(Instant now, String level, String message) {
+        return TIMESTAMP.format(now) + " " + String.format("%-5s", level) + " " + message.replaceAll("\\s*[\\r\\n\\t]+\\s*", " ");
     }
 
     /** Exception types only, e.g. "IOException < ClosedChannelException": messages are never written. */

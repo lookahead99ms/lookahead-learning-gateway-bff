@@ -155,9 +155,8 @@ class ContainerHealthcheckTest {
         });
     }
 
-    List<tools.jackson.databind.JsonNode> lines() {
-        var mapper = new tools.jackson.databind.ObjectMapper();
-        return written.toString(StandardCharsets.UTF_8).lines().map(mapper::readTree).toList();
+    List<String> lines() {
+        return written.toString(StandardCharsets.UTF_8).lines().toList();
     }
 
     @Test void eachFailureHasAReasonCodeAndWordsButNeverTheAnswerBody() throws Exception {
@@ -212,37 +211,32 @@ class ContainerHealthcheckTest {
         Path state = directory.resolve("state");
         Instant start = Instant.parse("2026-11-04T20:00:00Z");
         var refused = ContainerHealthcheck.Result.failed("CONNECTION_REFUSED", "nothing is listening on 127.0.0.1:8081");
-        ContainerHealthcheck.report(ContainerHealthcheck.Result.PASSED, uri, state, sink, start, "dev");
+        ContainerHealthcheck.report(ContainerHealthcheck.Result.PASSED, uri, state, sink, start);
         assertEquals(0, written.size());  // healthy and nothing before: silent
-        ContainerHealthcheck.report(refused, uri, state, sink, start, "dev");
-        ContainerHealthcheck.report(refused, uri, state, sink, start.plusSeconds(15), "dev");
-        ContainerHealthcheck.report(refused, uri, state, sink, start.plusSeconds(30), "dev");
+        ContainerHealthcheck.report(refused, uri, state, sink, start);
+        ContainerHealthcheck.report(refused, uri, state, sink, start.plusSeconds(15));
+        ContainerHealthcheck.report(refused, uri, state, sink, start.plusSeconds(30));
         assertEquals(1, lines().size());
-        var first = lines().getFirst();
-        assertEquals("WARN", first.at("/log/level").asString());
-        assertEquals("lookahead.lifecycle", first.at("/log/logger").asString());
-        assertEquals("gateway", first.at("/service/name").asString());
-        assertEquals("health.container-check", first.at("/event/action").asString());
-        assertEquals("CONNECTION_REFUSED", first.get("reason").asString());
-        assertEquals("Container health check failed (CONNECTION_REFUSED): nothing is listening on 127.0.0.1:8081; probe 127.0.0.1:"
-                + uri.getPort() + "/actuator/health/readiness, 1 failed in a row", first.get("message").asString());
+        // Plain logs: the same shape as the application's own lines, the reason code and the counts in the sentence.
+        assertEquals("2026-11-04T20:00:00.000Z WARN  Container health check failed: CONNECTION_REFUSED (nothing is listening on 127.0.0.1:8081); probe 127.0.0.1:"
+                + uri.getPort() + "/actuator/health/readiness, 1 failed in a row, down for 0 s", lines().getFirst());
         assertEquals("CONNECTION_REFUSED " + start.getEpochSecond() + " " + start.getEpochSecond() + " 3", Files.readString(state));
         // A different reason is written at once; the same one again only after a minute.
         var notReady = ContainerHealthcheck.Result.failed("NOT_READY", "readiness answered 503");
-        ContainerHealthcheck.report(notReady, uri, state, sink, start.plusSeconds(45), "dev");
-        ContainerHealthcheck.report(notReady, uri, state, sink, start.plusSeconds(60), "dev");
-        ContainerHealthcheck.report(notReady, uri, state, sink, start.plusSeconds(105), "dev");
+        ContainerHealthcheck.report(notReady, uri, state, sink, start.plusSeconds(45));
+        ContainerHealthcheck.report(notReady, uri, state, sink, start.plusSeconds(60));
+        ContainerHealthcheck.report(notReady, uri, state, sink, start.plusSeconds(105));
         assertEquals(3, lines().size());
-        assertEquals(6, lines().get(2).get("failures").asInt());
-        assertEquals(105, lines().get(2).get("downSeconds").asInt());
-        ContainerHealthcheck.report(ContainerHealthcheck.Result.PASSED, uri, state, sink, start.plusSeconds(120), "dev");
-        ContainerHealthcheck.report(ContainerHealthcheck.Result.PASSED, uri, state, sink, start.plusSeconds(135), "dev");
+        assertEquals("2026-11-04T20:01:45.000Z WARN  Container health check failed: NOT_READY (readiness answered 503); probe 127.0.0.1:"
+                + uri.getPort() + "/actuator/health/readiness, 6 failed in a row, down for 105 s", lines().get(2));
+        ContainerHealthcheck.report(ContainerHealthcheck.Result.PASSED, uri, state, sink, start.plusSeconds(120));
+        ContainerHealthcheck.report(ContainerHealthcheck.Result.PASSED, uri, state, sink, start.plusSeconds(135));
         assertEquals(4, lines().size());
-        var recovered = lines().getLast();
-        assertEquals("INFO", recovered.at("/log/level").asString());
-        assertEquals("Container health check passed again after 120 s and 6 failed probes (last reason NOT_READY)", recovered.get("message").asString());
+        assertEquals("2026-11-04T20:02:00.000Z INFO  Container health check passed again: READY after 120 s down and 6 failed probes (last reason NOT_READY)",
+                lines().getLast());
         assertFalse(Files.exists(state));
         assertFalse(written.toString(StandardCharsets.UTF_8).contains("ERROR"));
+        for (String line : lines()) assertFalse(line.endsWith(" ") || line.contains("{") || line.contains("lookahead.lifecycle"), line);
     }
 
     @Test void writingTheLineNeverChangesTheOutcome() throws Exception {
@@ -252,26 +246,24 @@ class ContainerHealthcheckTest {
         System.setErr(new java.io.PrintStream(err, true, StandardCharsets.UTF_8));
         try {
             // The application's stdout cannot be opened: the line goes to this probe's stderr instead.
-            ContainerHealthcheck.report(refused, uri, directory.resolve("state"), () -> { throw new IOException("synthetic"); }, Instant.now(), null);
+            ContainerHealthcheck.report(refused, uri, directory.resolve("state"), () -> { throw new IOException("synthetic"); }, Instant.now());
         } finally {
             System.setErr(originalErr);
         }
-        assertTrue(err.toString(StandardCharsets.UTF_8).contains("\"reason\":\"CONNECTION_REFUSED\""));
-        assertTrue(err.toString(StandardCharsets.UTF_8).contains("\"environment\":\"dev\""));
+        assertTrue(err.toString(StandardCharsets.UTF_8).contains(" WARN  Container health check failed: CONNECTION_REFUSED (nothing is listening)"));
         // An unwritable state file or a damaged one is ignored.
-        ContainerHealthcheck.report(refused, uri, directory.resolve("missing").resolve("state"), sink, Instant.now(), "dev");
+        ContainerHealthcheck.report(refused, uri, directory.resolve("missing").resolve("state"), sink, Instant.now());
         Files.writeString(directory.resolve("damaged"), "CONNECTION_REFUSED x y z");
-        ContainerHealthcheck.report(refused, uri, directory.resolve("damaged"), sink, Instant.now(), "dev");
+        ContainerHealthcheck.report(refused, uri, directory.resolve("damaged"), sink, Instant.now());
         Files.writeString(directory.resolve("short"), "garbage");
-        ContainerHealthcheck.report(refused, uri, directory.resolve("short"), sink, Instant.now(), "dev");
-        assertEquals("CONNECTION_REFUSED", lines().getLast().get("reason").asString());
+        ContainerHealthcheck.report(refused, uri, directory.resolve("short"), sink, Instant.now());
+        assertTrue(lines().getLast().contains("Container health check failed: CONNECTION_REFUSED ("), lines().getLast());
     }
 
-    @Test void theLineIsValidJsonWhateverTheWords() {
-        String line = ContainerHealthcheck.line(Instant.EPOCH, "dev", "WARN", "failure", "X", "quote \" backslash \\ newline \n tab \t", 1, 2);
-        var json = new tools.jackson.databind.ObjectMapper().readTree(line);
-        assertEquals("quote \" backslash \\ newline \n tab \t", json.get("message").asString());
-        assertEquals(1, json.get("failures").asInt());
-        assertEquals("1970-01-01T00:00:00Z", json.get("@timestamp").asString());
+    @Test void theLineStaysOneLineWithTheLevelPaddedWhateverTheWords() {
+        String line = ContainerHealthcheck.line(Instant.EPOCH, "WARN", "quote \" backslash \\ newline \n tab \t end");
+        assertEquals("1970-01-01T00:00:00.000Z WARN  quote \" backslash \\ newline tab end", line);
+        assertEquals("2026-11-17T20:41:18.144Z INFO  x", ContainerHealthcheck.line(Instant.parse("2026-11-17T20:41:18.144Z"), "INFO", "x"));
+        assertFalse(line.contains("\n"));
     }
 }
