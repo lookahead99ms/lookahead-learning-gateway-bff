@@ -35,10 +35,10 @@ final class PasswordSignInThrottle {
         boolean byAddress = record("ip:" + (address == null ? "" : address), PER_ADDRESS);
         boolean byAccount = account == null || account.isBlank() || record("user:" + account.strip().toLowerCase(Locale.ROOT), PER_ACCOUNT);
         if (!byAddress) OpsLog.limit("password-pages.per-address", PER_ADDRESS, WINDOW, action,
-                "Rate limit reached: {} refused, more than {} password-page attempts from one address in {} minutes",
+                "Rate limit password-pages.per-address reached: {} refused, more than {} password-page attempts from one address in {} minutes",
                 action, PER_ADDRESS, WINDOW.toMinutes());
         if (!byAccount) OpsLog.limit("password-pages.per-account", PER_ACCOUNT, WINDOW, action,
-                "Rate limit reached: {} refused, more than {} password-page attempts for one account in {} minutes",
+                "Rate limit password-pages.per-account reached: {} refused, more than {} password-page attempts for one account in {} minutes",
                 action, PER_ACCOUNT, WINDOW.toMinutes());
         return byAddress && byAccount;
     }

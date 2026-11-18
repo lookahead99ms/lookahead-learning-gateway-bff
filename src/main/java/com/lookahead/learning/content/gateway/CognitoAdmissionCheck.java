@@ -38,7 +38,7 @@ final class CognitoAdmissionCheck implements DevAdmission.Account {
 
     @Override public boolean allowed(String username) {
         try {
-            var user = OpsLog.aws("cognito", "AdminGetUser", () -> client.adminGetUser(AdminGetUserRequest.builder().userPoolId(poolId).username(username).build()));
+            var user = OpsLog.aws("cognito", "AdminGetUser", "pool " + poolId, false, () -> client.adminGetUser(AdminGetUserRequest.builder().userPoolId(poolId).username(username).build()));
             return Boolean.TRUE.equals(user.enabled());
         } catch (UserNotFoundException deleted) {
             return false;

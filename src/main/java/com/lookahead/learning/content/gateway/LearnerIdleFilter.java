@@ -24,8 +24,8 @@ final class LearnerIdleFilter extends OncePerRequestFilter {
                 boolean idle=last instanceof Instant;
                 String ended=testSession?"the test session ended with the staff sign-in kept aside":"the learner sign-in ended";
                 OpsLog.refused("sign-in.idle-timeout",idle?"IDLE_TIMEOUT":"NO_ACTIVITY_RECORDED")
-                    .log(idle?"Signed out after {} idle minutes: {}, the DEV gate stays open"
-                        :"Signed out: the session had no activity time (limit {} idle minutes); {}, the DEV gate stays open",IDLE.toMinutes(),ended);
+                    .log(idle?"Signed out: IDLE_TIMEOUT (no activity for {} minutes); {}, the DEV gate stays open"
+                        :"Signed out: NO_ACTIVITY_RECORDED (the session had no activity time; the limit is {} idle minutes); {}, the DEV gate stays open",IDLE.toMinutes(),ended);
                 DevAdmission.clearLearner(request);
             }
             else if(activity(request)) session.setAttribute(LAST_ACTIVITY,now);

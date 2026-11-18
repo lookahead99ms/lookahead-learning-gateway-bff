@@ -277,16 +277,16 @@ class PasswordSignInControllerTest {
             assertThat(code(controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse()))).isEqualTo("SERVICE_UNAVAILABLE");
             var step = log.lines().stream().filter(line -> "sign-in.cognito-step".equals(line.getKeyValuePairs().getFirst().value)).toList();
             assertThat(step).hasSize(1);
-            assertThat(step.getFirst().getFormattedMessage()).startsWith("Cognito asked for sign-in step SMS_MFA, which our sign-in page does not support");
+            assertThat(step.getFirst().getFormattedMessage()).startsWith("Cognito asked for sign-in step SMS_MFA: COGNITO_STEP_UNSUPPORTED (our sign-in page does not support it");
             assertThat(com.lookahead.gateway.LogCapture.pairs(step.getFirst())).contains("reason=COGNITO_STEP_UNSUPPORTED", "cognito.challenge=SMS_MFA");
             log.clear();
             answer = m -> InitiateAuthResponse.builder().challengeName(ChallengeNameType.EMAIL_OTP).build();
             assertThat(code(controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse()))).isEqualTo("SERVICE_UNAVAILABLE");
-            assertThat(log.messages()).contains("Cognito's sign-in answer had no tokens and no session for step EMAIL_OTP; answered 503");
+            assertThat(log.messages()).contains("Cognito's sign-in answer was incomplete: COGNITO_ANSWER_INCOMPLETE (no tokens and no session for step EMAIL_OTP); answered 503");
             log.clear();
             answer = m -> InitiateAuthResponse.builder().build();
             controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"" + PASSWORD + "\"}"), new MockHttpServletResponse());
-            assertThat(log.messages()).contains("Cognito's sign-in answer had no tokens and no next step; answered 503");
+            assertThat(log.messages()).contains("Cognito's sign-in answer was incomplete: COGNITO_ANSWER_INCOMPLETE (no tokens and no next step); answered 503");
             log.assertNothing(PASSWORD, "synthetic-cognito-session", "priya");
         }
     }
@@ -433,7 +433,7 @@ class PasswordSignInControllerTest {
             controller.signIn(post("{\"email\":\"priya@example.invalid\",\"password\":\"wrong\"}"), new MockHttpServletResponse());
             var limit = appender.list.stream().filter(line -> line.getLoggerName().equals("lookahead.limit")).findFirst().orElseThrow();
             assertThat(limit.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
-            assertThat(limit.getFormattedMessage()).isEqualTo("Rate limit reached: sign-in.password refused, more than 10 password-page attempts for one account in 10 minutes");
+            assertThat(limit.getFormattedMessage()).isEqualTo("Rate limit password-pages.per-account reached: sign-in.password refused, more than 10 password-page attempts for one account in 10 minutes");
             assertThat(OpsLogTest.pairs(limit)).contains("limit.name=password-pages.per-account", "limit.max=10", "limit.window=PT10M", "event.action=sign-in.password");
             assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage).contains("Password sign-in refused: TOO_MANY_REQUESTS (too many attempts)");
             // One address spraying accounts trips the per-address limit.
@@ -448,8 +448,8 @@ class PasswordSignInControllerTest {
                 .awsErrorDetails(software.amazon.awssdk.awscore.exception.AwsErrorDetails.builder().errorCode("TooManyRequestsException").build()).build(); };
             controller().signUp(post("{\"firstName\":\"Arjun\",\"lastName\":\"Rao\",\"email\":\"arjun@example.invalid\",\"password\":\"" + PASSWORD + "\"}"));
             assertThat(appender.list).anyMatch(line -> line.getLoggerName().equals("lookahead.limit") && OpsLogTest.pairs(line).contains("limit.name=cognito")
-                && line.getFormattedMessage().equals("Rate limit reached: sign-up.started refused by Cognito (TooManyRequestsException)"));
-            // A failure with no answer names its types, not its message.
+                && line.getFormattedMessage().equals("Rate limit cognito reached: sign-up.started refused by Cognito (TooManyRequestsException)"));
+            // A failure with no answer: the WARN outcome line names its types; the ERROR upstream line quotes the message with the email masked.
             appender.list.clear();
             answer = m -> { throw new IllegalStateException("synthetic transport failure for arjun@example.invalid"); };
             controller().resend(post("{\"email\":\"arjun@example.invalid\"}"));

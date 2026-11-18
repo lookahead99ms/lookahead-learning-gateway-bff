@@ -20,6 +20,12 @@ server:
         http-only: true
         same-site: lax
         secure: true
+# Plain logs (owner decision 2026-11-17): every line is one sentence a person reads in CloudWatch, the same in every
+# profile. "<UTC timestamp with millis> <LEVEL padded to 5> <sentence>", then "  [request <first 8 of the request id>]" only
+# while a request's MDC requestId is set. The stack trace of an ERROR line follows it in full (%ex).
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX, UTC} %-5level %m%replace(%.-8X{requestId}){'^(.+)$', '  [request $1]'}%n%ex"
 management:
   endpoints:
     web:

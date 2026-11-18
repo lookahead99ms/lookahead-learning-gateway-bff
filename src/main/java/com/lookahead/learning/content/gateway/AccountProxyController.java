@@ -84,7 +84,7 @@ public class AccountProxyController {
             // DLV-969: Identity said 200 but its answer is not JSON; the browser sees 503, the log says why.
             OpsLog.failed("account.identity", "IDENTITY_ANSWER_NOT_JSON").addKeyValue("upstream.service", "identity")
                     .addKeyValue("url.path", RequestLog.path(request)).addKeyValue("exception.types", RequestLog.types(invalidResponse))
-                    .log("Identity's answer to {} {} was not readable JSON ({}); answered 503", RequestLog.method(request), RequestLog.path(request),
+                    .log("Identity's answer to {} {} was unusable: IDENTITY_ANSWER_NOT_JSON (not readable JSON: {}); answered 503", RequestLog.method(request), RequestLog.path(request),
                             RequestLog.types(invalidResponse));
             return ResponseEntity.status(503).header(HttpHeaders.CACHE_CONTROL, "no-store").build();
         }

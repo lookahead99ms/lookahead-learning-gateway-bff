@@ -1,8 +1,8 @@
 # Author review proxy
 
 The BFF forwards these exact routes to the fixed Domain API origin. Domain owns
-the version-bound artifact manifest, author-capability checks and append-only
-PostgreSQL review history. Gateway never reads or changes delivery-board files.
+the version-bound artifact manifest, author-capability checks and the append-only
+review history (on DynamoDB since 2026-11-17). Gateway never reads or changes delivery-board files.
 
 | Browser route | Method | Domain route |
 | --- | --- | --- |

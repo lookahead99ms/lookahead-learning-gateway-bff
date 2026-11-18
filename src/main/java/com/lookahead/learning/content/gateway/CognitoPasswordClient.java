@@ -21,6 +21,9 @@ final class CognitoPasswordClient {
 
     CognitoPasswordClient(CognitoIdentityProviderClient cognito, OAuthSettings settings) { this.cognito = cognito; this.settings = settings; }
 
+    /** The user pool app client the calls name, for the ERROR line when Cognito refuses or does not answer. */
+    private String resource() { return "app client " + settings.clientId(); }
+
     /** Base64(HMAC-SHA256(client secret, username + client id)), as Cognito requires for a client with a secret. */
     String secretHash(String username) {
         try {
@@ -33,7 +36,7 @@ final class CognitoPasswordClient {
     }
 
     InitiateAuthResponse signIn(String username, String password) {
-        return OpsLog.aws("cognito", "InitiateAuth", () -> cognito.initiateAuth(r -> r.clientId(settings.clientId()).authFlow(AuthFlowType.USER_PASSWORD_AUTH)
+        return OpsLog.aws("cognito", "InitiateAuth", resource(), false, () -> cognito.initiateAuth(r -> r.clientId(settings.clientId()).authFlow(AuthFlowType.USER_PASSWORD_AUTH)
             .authParameters(Map.of("USERNAME", username, "PASSWORD", password, "SECRET_HASH", secretHash(username)))));
     }
 
@@ -41,30 +44,30 @@ final class CognitoPasswordClient {
         var responses = new java.util.HashMap<>(answers);
         responses.put("USERNAME", username);
         responses.put("SECRET_HASH", secretHash(username));
-        return OpsLog.aws("cognito", "RespondToAuthChallenge", () -> cognito.respondToAuthChallenge(r -> r.clientId(settings.clientId())
+        return OpsLog.aws("cognito", "RespondToAuthChallenge", resource(), false, () -> cognito.respondToAuthChallenge(r -> r.clientId(settings.clientId())
             .challengeName(challenge).session(session).challengeResponses(responses)));
     }
 
     SignUpResponse signUp(String email, String password, String firstName, String lastName) {
-        return OpsLog.aws("cognito", "SignUp", () -> cognito.signUp(r -> r.clientId(settings.clientId()).username(email).password(password).secretHash(secretHash(email))
+        return OpsLog.aws("cognito", "SignUp", resource(), false, () -> cognito.signUp(r -> r.clientId(settings.clientId()).username(email).password(password).secretHash(secretHash(email))
             .userAttributes(attribute("email", email), attribute("given_name", firstName), attribute("family_name", lastName),
                 attribute("name", (firstName + " " + lastName).strip()))));
     }
 
     void confirmSignUp(String email, String code) {
-        OpsLog.aws("cognito", "ConfirmSignUp", () -> cognito.confirmSignUp(r -> r.clientId(settings.clientId()).username(email).confirmationCode(code).secretHash(secretHash(email))));
+        OpsLog.aws("cognito", "ConfirmSignUp", resource(), false, () -> cognito.confirmSignUp(r -> r.clientId(settings.clientId()).username(email).confirmationCode(code).secretHash(secretHash(email))));
     }
 
     ResendConfirmationCodeResponse resend(String email) {
-        return OpsLog.aws("cognito", "ResendConfirmationCode", () -> cognito.resendConfirmationCode(r -> r.clientId(settings.clientId()).username(email).secretHash(secretHash(email))));
+        return OpsLog.aws("cognito", "ResendConfirmationCode", resource(), false, () -> cognito.resendConfirmationCode(r -> r.clientId(settings.clientId()).username(email).secretHash(secretHash(email))));
     }
 
     ForgotPasswordResponse forgot(String email) {
-        return OpsLog.aws("cognito", "ForgotPassword", () -> cognito.forgotPassword(r -> r.clientId(settings.clientId()).username(email).secretHash(secretHash(email))));
+        return OpsLog.aws("cognito", "ForgotPassword", resource(), false, () -> cognito.forgotPassword(r -> r.clientId(settings.clientId()).username(email).secretHash(secretHash(email))));
     }
 
     void reset(String email, String code, String newPassword) {
-        OpsLog.aws("cognito", "ConfirmForgotPassword", () -> cognito.confirmForgotPassword(r -> r.clientId(settings.clientId()).username(email).confirmationCode(code).password(newPassword).secretHash(secretHash(email))));
+        OpsLog.aws("cognito", "ConfirmForgotPassword", resource(), false, () -> cognito.confirmForgotPassword(r -> r.clientId(settings.clientId()).username(email).confirmationCode(code).password(newPassword).secretHash(secretHash(email))));
     }
 
     private static AttributeType attribute(String name, String value) { return AttributeType.builder().name(name).value(value).build(); }

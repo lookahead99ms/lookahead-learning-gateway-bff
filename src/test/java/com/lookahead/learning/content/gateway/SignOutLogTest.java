@@ -37,18 +37,18 @@ class SignOutLogTest {
         SecurityContextHolder.getContext().setAuthentication(new OAuth2AuthenticationToken(
                 new DefaultOAuth2User(Set.of(), Map.of("sub", "person@example.invalid"), "sub"), Set.of(), "lookahead"));
         var done = signOut("POST", SignOutLog.PATH, 200);
-        assertThat(done).extracting(ILoggingEvent::getFormattedMessage).containsExactly("Signed out: Domain ended the sign-in and the provider tokens were dropped");
+        assertThat(done).extracting(ILoggingEvent::getFormattedMessage).containsExactly("Signed out (kind sign-in): Domain ended the sign-in and the provider tokens were dropped");
         assertThat(OpsLogTest.pairs(done.getFirst())).contains("event.action=sign-out", "event.outcome=success", "signOut.kind=sign-in");
         var unconfirmed = signOut("POST", SignOutLog.PATH, 503);
         assertThat(unconfirmed.getFirst().getLevel()).isEqualTo(Level.WARN);
         assertThat(unconfirmed.getFirst().getFormattedMessage())
-                .isEqualTo("Sign out did not complete: HTTP 503 (Domain could not confirm the sign-out; the person stays signed in and can retry)");
+                .isEqualTo("Sign out (kind sign-in) did not complete: HTTP 503 (Domain could not confirm the sign-out; the person stays signed in and can retry)");
         assertThat(OpsLogTest.pairs(signOut("POST", SignOutLog.PATH, 401).getFirst())).contains("event.outcome=refused", "reason=HTTP_401");
         assertThat(OpsLogTest.pairs(signOut("POST", SignOutLog.PATH, 500).getFirst())).contains("event.outcome=failure", "reason=HTTP_500");
         assertThat(signOut("GET", SignOutLog.PATH, 200)).isEmpty();
         assertThat(signOut("POST", "/bff/api/v1/plans", 200)).isEmpty();
         SecurityContextHolder.clearContext();
-        assertThat(signOut("POST", SignOutLog.PATH, 200)).extracting(ILoggingEvent::getFormattedMessage).containsExactly("Sign out with no sign-in in this session");
+        assertThat(signOut("POST", SignOutLog.PATH, 200)).extracting(ILoggingEvent::getFormattedMessage).containsExactly("Sign out with no sign-in in this session (kind none)");
         for (var line : done) assertThat(line.getFormattedMessage() + OpsLogTest.pairs(line)).doesNotContain("person@example.invalid");
     }
 }

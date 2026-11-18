@@ -34,21 +34,21 @@ public final class DevSessionStatus implements AutoCloseable {
     @GetMapping("/dev/session") ResponseEntity<Map<String,Object>> status(){
         try{
             // Polled by the Web shell: a successful read logs at DEBUG; a failure, a refusal and every retry at WARN/INFO.
-            var state=OpsLog.aws("dynamodb","GetItem",true,()->client.getItem(r->r.tableName(table).consistentRead(true).key(Map.of("id",AttributeValue.builder().s("dev").build())))).item();
+            var state=OpsLog.aws("dynamodb","GetItem","table "+table,true,()->client.getItem(r->r.tableName(table).consistentRead(true).key(Map.of("id",AttributeValue.builder().s("dev").build())))).item();
             String deadline=state.containsKey("deadline")?state.get("deadline").s():"";
             boolean warning;
             try{warning=!deadline.isEmpty()&&!Instant.now().isBefore(Instant.parse(deadline).minusSeconds(900));}
             catch(java.time.format.DateTimeParseException invalid){
                 // DLV-969: the table answered, but its deadline is not an instant; polled, so once a minute while it stays so.
                 if(invalidDeadline.due("DEV_STATUS_INVALID"))OpsLog.failed("dev-session.status","DEV_STATUS_INVALID")
-                    .log("DEV session status unavailable: the operations table's deadline attribute is not an ISO-8601 instant (logged at most once a minute)");
+                    .log("DEV session status unavailable: DEV_STATUS_INVALID (the operations table's deadline attribute is not an ISO-8601 instant); logged at most once a minute");
                 return ResponseEntity.status(503).header("Cache-Control","no-store").body(Map.of("code","DEV_STATUS_UNAVAILABLE"));
             }
             invalidDeadline.clear();
             return ResponseEntity.ok().header("Cache-Control","no-store").body(Map.of("dev",true,"deadline",deadline,"warning",warning,"maintenance",state.containsKey("operation")));
         }catch(RuntimeException unavailable){
             OpsLog.failed("dev-session.status","DEV_STATUS_UNAVAILABLE").addKeyValue("exception.types",RequestLog.types(unavailable))
-                .log("DEV session status unavailable: the operations table could not be read ({})",RequestLog.types(unavailable));
+                .log("DEV session status unavailable: DEV_STATUS_UNAVAILABLE (the operations table could not be read: {}); answered 503",RequestLog.types(unavailable));
             return ResponseEntity.status(503).header("Cache-Control","no-store").body(Map.of("code","DEV_STATUS_UNAVAILABLE"));
         }
     }

@@ -38,7 +38,7 @@ public final class DevAccessController {
         } catch (RuntimeException unavailable) {
             learnerConfirmed = false;
             OpsLog.failed("dev-gate.exit", "SIGN_OUT_UNCONFIRMED").addKeyValue("exception.types", RequestLog.types(unavailable))
-                .log("Exit DEV: the platform sign-out could not be confirmed ({}); the session ends anyway", RequestLog.types(unavailable));
+                .log("Exit DEV: SIGN_OUT_UNCONFIRMED (the platform sign-out could not be confirmed: {}); the session ends anyway", RequestLog.types(unavailable));
         } finally {
             var remaining = request.getSession(false);
             if (remaining != null) remaining.invalidate();

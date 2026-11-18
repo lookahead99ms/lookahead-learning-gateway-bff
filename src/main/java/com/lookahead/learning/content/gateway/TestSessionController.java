@@ -185,7 +185,7 @@ public class TestSessionController {
             });
         } catch (RuntimeException unavailable) {
             OpsLog.failed("test-session.domain", "DOMAIN_UNAVAILABLE").addKeyValue("exception.types", RequestLog.types(unavailable))
-                .log("Test session request could not reach Domain ({})", RequestLog.types(unavailable));
+                .log("Test session request could not reach Domain: DOMAIN_UNAVAILABLE ({}); answered 503", RequestLog.types(unavailable));
             return failure(503, "SERVICE_UNAVAILABLE", "Test accounts are unavailable. Retry shortly.");
         }
     }

@@ -167,8 +167,19 @@ class GatewayJsonContractTest {
 
     @Test void gatewayErrorsKeepStableCodesAndNeverSerializeUpstreamExceptionSecrets() {
         var handler = new GatewayErrorHandler();
-        var unavailable = handler.unavailable(new RestClientException("Bearer " + ACCESS_TOKEN + " " + settings.clientSecret()),
-                new org.springframework.mock.web.MockHttpServletRequest("GET", "/bff/api/v1/me"));
+        // Plain logs: the failure is one ERROR line quoting the exception's message, with a bearer credential in it masked.
+        var upstream = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("lookahead.upstream");
+        var errors = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>(); errors.start(); upstream.addAppender(errors);
+        org.springframework.http.ResponseEntity<?> unavailable;
+        try {
+            unavailable = handler.unavailable(new RestClientException("Identity refused: Authorization: Bearer " + ACCESS_TOKEN),
+                    new org.springframework.mock.web.MockHttpServletRequest("GET", "/bff/api/v1/me"));
+        } finally { upstream.detachAppender(errors); }
+        assertThat(errors.list).hasSize(1);
+        assertThat(errors.list.getFirst().getLevel()).isEqualTo(ch.qos.logback.classic.Level.ERROR);
+        assertThat(errors.list.getFirst().getFormattedMessage())
+                .startsWith("Outside a request: the upstream call for GET /bff/api/v1/me failed (RestClientException: Identity refused: Authorization=[hidden]); reference ")
+                .doesNotContain(ACCESS_TOKEN);
         var events = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("lookahead.event");
         var capture = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>(); capture.start(); events.addAppender(capture);
         org.springframework.http.ResponseEntity<?> expired;

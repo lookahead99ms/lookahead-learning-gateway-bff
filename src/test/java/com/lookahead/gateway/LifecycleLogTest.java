@@ -57,10 +57,10 @@ class LifecycleLogTest {
         lifecycle.availability(new AvailabilityChangeEvent<>(context, ReadinessState.ACCEPTING_TRAFFIC));  // no change: no line
         assertThat(lifecycle.phase()).isEqualTo(LifecycleLog.Phase.RUNNING);
         assertThat(log.messages()).containsExactly(
-                "Liveness changed to CORRECT (was not reported): the application is running",
-                "Readiness changed to ACCEPTING_TRAFFIC (was not reported): /actuator/health/readiness answers UP",
-                "Started and ready: Gateway 2026.11.04.1 (release v2026.11.04.20.00, commit abc1234), profiles [gateway,lower-cost-dev], "
-                        + "readiness ACCEPTING_TRAFFIC, port 8443, management port 8081, upstreams domain=domain.lookahead-dev.internal:8443 "
+                "Liveness changed to CORRECT (was not reported): LIVENESS_CORRECT (the application is running)",
+                "Readiness changed to ACCEPTING_TRAFFIC (was not reported): ACCEPTING_TRAFFIC (/actuator/health/readiness answers UP)",
+                "Started and ready: Gateway 2026.11.04.1 (release v2026.11.04.20.00, commit abc1234), profiles [gateway,lower-cost-dev], environment dev, "
+                        + "readiness ACCEPTING_TRAFFIC, liveness CORRECT, port 8443, management port 8081, upstreams domain=domain.lookahead-dev.internal:8443 "
                         + "web=web.lookahead-dev.internal:8443 identity=unparseable cognito=us-east-2");
         assertThat(log.lines()).allMatch(line -> line.getLevel() == Level.INFO);
         assertThat(LogCapture.pairs(log.last())).contains("event.action=startup.ready", "gateway.version=2026.11.04.1",
@@ -81,10 +81,10 @@ class LifecycleLogTest {
         lifecycle.availability(new AvailabilityChangeEvent<>(this, ReadinessState.REFUSING_TRAFFIC));
         lifecycle.availability(new AvailabilityChangeEvent<>(this, LivenessState.BROKEN));
         assertThat(log.lines()).allMatch(line -> line.getLevel() == Level.WARN);
-        assertThat(log.messages().get(0)).isEqualTo("Readiness changed to REFUSING_TRAFFIC (was ACCEPTING_TRAFFIC): marked by LifecycleLogTest "
-                + "while running; /actuator/health/readiness answers 503 OUT_OF_SERVICE and the container health check fails until it is accepting traffic again");
+        assertThat(log.messages().get(0)).isEqualTo("Readiness changed to REFUSING_TRAFFIC (was ACCEPTING_TRAFFIC): MARKED_REFUSING_TRAFFIC (marked by LifecycleLogTest "
+                + "while running; /actuator/health/readiness answers 503 OUT_OF_SERVICE and the container health check fails until it is accepting traffic again)");
         assertThat(LogCapture.pairs(log.lines().get(0))).contains("reason=MARKED_REFUSING_TRAFFIC", "readiness.previous=ACCEPTING_TRAFFIC");
-        assertThat(log.messages().get(1)).isEqualTo("Liveness changed to BROKEN (was not reported): marked by LifecycleLogTest; /actuator/health/liveness answers 503");
+        assertThat(log.messages().get(1)).isEqualTo("Liveness changed to BROKEN (was not reported): LIVENESS_BROKEN (marked by LifecycleLogTest; /actuator/health/liveness answers 503)");
         assertThat(LogCapture.pairs(log.lines().get(1))).contains("reason=LIVENESS_BROKEN");
         assertThat(lifecycle.phase()).isEqualTo(LifecycleLog.Phase.RUNNING);
     }
@@ -113,7 +113,7 @@ class LifecycleLogTest {
         assertThat(LogCapture.pairs(log.last())).contains("readiness.last=NONE", "ready.reached=false");
         // Without build information or upstreams the summary still renders.
         lifecycle.summary();
-        assertThat(log.last().getFormattedMessage()).contains("Gateway unknown (release unknown, commit unknown)", "port unset",
+        assertThat(log.last().getFormattedMessage()).contains("Gateway unknown (release unknown, commit unknown)", "environment unset", "liveness not reported", "port unset",
                 "management port same as server", "upstreams none");
         assertThat(lifecycle.upstreams()).isEqualTo("none");
     }

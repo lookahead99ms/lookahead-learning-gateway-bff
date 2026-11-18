@@ -28,7 +28,8 @@ public final class DevWebProxy {
                     boolean redirect = received.getStatusCode().is3xxRedirection();
                     OpsLog.failed("web.proxy", redirect ? "WEB_REDIRECT_REFUSED" : "WEB_ANSWER_TOO_LARGE").addKeyValue("upstream.service", "web")
                         .addKeyValue("upstream.status", received.getStatusCode().value()).addKeyValue("url.path", RequestLog.path(request))
-                        .log("Web answer for {} {} refused with 502: {}", RequestLog.method(request), RequestLog.path(request),
+                        .log("Web answer for {} {} refused with 502: {} ({})", RequestLog.method(request), RequestLog.path(request),
+                            redirect ? "WEB_REDIRECT_REFUSED" : "WEB_ANSWER_TOO_LARGE",
                             redirect ? "Web answered a redirect (HTTP " + received.getStatusCode().value() + "), which the Gateway never follows or relays"
                                 : "larger than 16 MB");
                     return ResponseEntity.status(502).body(new byte[0]);

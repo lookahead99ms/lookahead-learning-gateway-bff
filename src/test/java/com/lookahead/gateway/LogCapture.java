@@ -4,13 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.PatternLayout;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.LoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.io.ClassPathResource;
 
 /** DLV-969: captures the named loggers at DEBUG for one test; restores them on close. */
 public final class LogCapture implements AutoCloseable {
@@ -50,6 +56,37 @@ public final class LogCapture implements AutoCloseable {
         for (String part : text) {
             assertThat(part).doesNotContain("ERROR");
             for (String secret : secrets) assertThat(part).doesNotContain(secret);
+        }
+    }
+
+    /** The one console pattern every profile uses, read from the real {@code application.yml} ({@code logging.pattern.console}). */
+    public static String consolePattern() {
+        try {
+            for (var source : new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"))) {
+                Object pattern = source.getProperty("logging.pattern.console");
+                if (pattern != null) return pattern.toString();
+            }
+        } catch (java.io.IOException unreadable) {
+            throw new IllegalStateException(unreadable);
+        }
+        throw new IllegalStateException("application.yml sets no logging.pattern.console");
+    }
+
+    /**
+     * Renders a captured event exactly as the console would, through the real pattern, at the given instant: the
+     * timestamp, the level, the sentence, the request bracket when the event's MDC holds a requestId, and the stack trace
+     * on the lines after it when the event carries an exception.
+     */
+    public static String plain(ILoggingEvent event, Instant at) {
+        var layout = new PatternLayout();
+        layout.setContext((LoggerContext) LoggerFactory.getILoggerFactory());
+        layout.setPattern(consolePattern());
+        layout.start();
+        try {
+            if (event instanceof LoggingEvent stamped) stamped.setTimeStamp(at.toEpochMilli());
+            return layout.doLayout(event);
+        } finally {
+            layout.stop();
         }
     }
 

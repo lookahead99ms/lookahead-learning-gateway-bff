@@ -142,7 +142,7 @@ class SecurityGateTests(unittest.TestCase):
 
     def test_runtime_base_preserves_the_unprivileged_java_contract(self):
         dockerfile = (checks.ROOT / 'Dockerfile').read_text()
-        self.assertEqual('eclipse-temurin:21-jre-noble@sha256:161310cd5bd41fd549d19cf9f90b614897cb4a1532555c613b43b7e0628fe5d6', checks.base_images(dockerfile)[1])
+        self.assertEqual('eclipse-temurin:21-jre-noble@sha256:0d57a8e90c2bb844c5a8e1b2b71e11eff06dad7edcfd803cd21ed4ae203b2515', checks.base_images(dockerfile)[1])
         self.assertIn('USER 10001:10001', dockerfile)
         self.assertIn('--shell /usr/sbin/nologin', dockerfile)
         self.assertIn('HEALTHCHECK', dockerfile)
@@ -367,15 +367,80 @@ class SecurityGateTests(unittest.TestCase):
             checks.scan('config')
             self.assertEqual('',(Path(directory)/'scanner-config'/'ignore').read_text())
 
-    def test_repository_carries_only_the_reviewed_apt_exception(self):
-        # DLV-968: the 2026-10-31 eclipse-temurin noble rebuild ships libbrotli1 1.1.0-2ubuntu0.1, so the CVE-2026-111497 entry is gone.
-        # DLV-969 (owner, 2026-11-05): CVE-2026-109518 in apt has no Ubuntu fix yet; it is carried for one week and nothing else is.
-        accepted=checks.load_vulnerability_exceptions(today=date(2026,11,5))
-        self.assertEqual(['CVE-2026-109518'],sorted(accepted))
-        self.assertEqual('apt',accepted['CVE-2026-109518']['package'])
-        self.assertLessEqual(date.fromisoformat(accepted['CVE-2026-109518']['expiresAt']),date(2026,11,12))
-        with self.assertRaisesRegex(ValueError,'Expired vulnerability exception'):
-            checks.load_vulnerability_exceptions(today=date(2026,11,13))
+    def test_image_command_checks_both_pins_and_final_java_image_after_a_failure(self):
+        bases = checks.base_images((checks.ROOT / 'Dockerfile').read_text())
+        with tempfile.TemporaryDirectory() as directory, patch.object(checks, 'OUT', Path(directory)), \
+                patch.object(checks.sys, 'argv', ['check.py', 'images', '--image', 'fixture:built']), \
+                patch.object(checks, 'scan', side_effect=[ValueError('fixture'), None, None]) as scan:
+            with self.assertRaisesRegex(ValueError, '^Image findings or coverage failures require review$'):
+                checks.main()
+            self.assertEqual([('image', target) for target in [*bases, 'fixture:built']],
+                             [call.args for call in scan.call_args_list])
+            self.assertEqual([{'require_java': False}, {'require_java': False}, {'require_java': True}],
+                             [call.kwargs for call in scan.call_args_list])
+        with patch.object(checks.sys, 'argv', ['check.py', 'images']), patch.object(checks, 'scan') as scan:
+            with self.assertRaisesRegex(ValueError, '^Built application image is required$'):
+                checks.main()
+            scan.assert_not_called()
+
+    def test_final_image_requires_java_inventory_in_addition_to_os_packages(self):
+        report = {'Metadata': {'OS': {'Family': 'ubuntu'}}, 'Results': [
+            {'Class': 'os-pkgs', 'Packages': [{'Name': 'apt', 'Version': '2.8.4ubuntu0.1'}]}]}
+        with self.assertRaisesRegex(ValueError, '^Java package coverage absent$'):
+            checks.trivy_gate(report, 'image', require_java=True)
+        report['Results'].append({'Class': 'lang-pkgs', 'Type': 'jar',
+                                  'Packages': [{'Name': 'fixture-java', 'Version': '1'}]})
+        self.assertEqual({'vulnerabilities': 0, 'misconfigurations': 0, 'secrets': 0},
+                         checks.trivy_gate(report, 'image', require_java=True))
+
+    def test_gradle_inventory_retains_test_and_runtime_dependencies_and_rejects_missing_configurations(self):
+        resolved = {'configurations': [':project:runtimeClasspath', ':project:testRuntimeClasspath'], 'components': [
+            {'group': 'fixture', 'name': 'runtime', 'version': '1'},
+            {'group': 'fixture', 'name': 'test-only', 'version': '2'}]}
+        with tempfile.TemporaryDirectory() as directory, patch.object(checks, 'OUT', Path(directory)):
+            def resolve(args, **kwargs):
+                self.assertEqual('securityResolvedDependencies', args[-1])
+                checks.write(kwargs['env']['SECURITY_DEPENDENCY_OUTPUT'], resolved)
+            with patch.object(checks, 'run', side_effect=resolve):
+                checks.dependencies('gradle')
+                bom = checks.read(Path(directory) / 'dependencies.cdx.json')
+                self.assertEqual({'pkg:maven/fixture/runtime@1', 'pkg:maven/fixture/test-only@2'},
+                                 {item['purl'] for item in bom['components']})
+                resolved['configurations'] = []
+                with self.assertRaisesRegex(ValueError, '^No resolved Gradle configurations$'):
+                    checks.dependencies('gradle')
+
+    def test_repository_removes_apt_exception_and_pins_fixed_bases(self):
+        self.assertEqual({}, checks.load_vulnerability_exceptions(today=date(2026, 11, 17)))
+        self.assertEqual([
+            'eclipse-temurin:21-jdk-noble@sha256:06c1f157dacf6b68198bd9a4186dd4c34ef24e65d7bbbe2a0cf8e62571ad38c9',
+            'eclipse-temurin:21-jre-noble@sha256:0d57a8e90c2bb844c5a8e1b2b71e11eff06dad7edcfd803cd21ed4ae203b2515',
+        ], checks.base_images((checks.ROOT / 'Dockerfile').read_text()))
+
+    def test_historical_apt_exception_still_expires_after_one_week(self):
+        item = {'vulnerabilityId': 'CVE-2026-109518', 'package': 'apt', 'expiresAt': '2026-11-12',
+                'ticket': 'DLV-969', 'rationale': 'Historical November 5 one-week approval fixture.'}
+        with tempfile.TemporaryDirectory() as directory:
+            policy = Path(directory) / 'exceptions.json'
+            policy.write_text(checks.json.dumps({'version': 1, 'exceptions': [item]}))
+            accepted = checks.load_vulnerability_exceptions(policy, date(2026, 11, 12))
+            self.assertEqual(['CVE-2026-109518'], sorted(accepted))
+            self.assertEqual('apt', accepted['CVE-2026-109518']['package'])
+            with self.assertRaisesRegex(ValueError, '^Expired vulnerability exception$'):
+                checks.load_vulnerability_exceptions(policy, date(2026, 11, 13))
+
+    def test_removed_apt_exception_cannot_hide_a_reappearing_finding(self):
+        for package in ('apt', 'libapt-pkg6.0t64'):
+            image = {'Metadata': {'OS': {'Family': 'ubuntu'}}, 'Results': [
+                {'Class': 'os-pkgs', 'Packages': [{'Name': package, 'Version': '2.8.3'}],
+                 'Vulnerabilities': [{'VulnerabilityID': 'CVE-2026-109518', 'PkgName': package, 'Severity': 'HIGH'}]}]}
+            with self.subTest(package=package), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(checks, 'OUT', Path(directory)), patch.object(checks, 'run'), \
+                    patch.object(checks, 'read', return_value=image), \
+                    patch.object(checks, 'load_vulnerability_exceptions', return_value={}):
+                with self.assertRaisesRegex(ValueError, '^Security findings require review$'):
+                    checks.scan('image', 'fixture:1')
+                self.assertEqual('', (Path(directory) / 'scanner-config/ignore').read_text())
 
     def test_misconfiguration_exceptions_are_exact_expiring_and_bound_to_an_existing_target(self):
         # DLV-968: a trivy check that is a false positive on one named file may be carried for a bounded time; nothing else is ignored.
