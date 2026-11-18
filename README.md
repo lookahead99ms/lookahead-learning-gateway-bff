@@ -408,6 +408,11 @@ A rejected notification logs only its level and a bounded Java diagnostic ID,
 never its message, source snippet, locations or properties.
 
 
+The November 17 base refresh includes Ubuntu's `apt` and `libapt-pkg6.0t64`
+`2.8.4ubuntu0.1` fix for CVE-2026-109518 and removes its expired vulnerability
+exception. Both base images and the built image are scanned without vulnerability
+ignores; see [security CI](docs/security-ci.md).
+
 The Docker builder uses digest-pinned Eclipse Temurin Java 21 Ubuntu 24.04
 (`21-jdk-noble`); the runtime uses a separately pinned Java 21 Ubuntu 24.04 image
 (`21-jre-noble`). The runtime uses glibc and Ubuntu's account-creation

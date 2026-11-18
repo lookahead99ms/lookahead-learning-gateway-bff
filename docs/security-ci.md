@@ -174,3 +174,14 @@ after checking that diff. Its rule, file, owner and November 12 expiry remain
 unchanged. Regression tests reject the old digest and exercise both inbox routes'
 forwarding, authentication, query/body limits and test-session rejection.
 Fresh hosted CodeQL remains required; this metadata update is not a scan result.
+
+### APT base-image remediation — November 17, 2026
+
+PR152 replaces the old Noble JDK/JRE image pins with the November11 Temurin
+rebuilds containing `apt` and `libapt-pkg6.0t64` version `2.8.4ubuntu0.1`, the
+[Ubuntu fix for CVE-2026-109518](https://ubuntu.com/security/CVE-2026-109518). The November12 vulnerability exception is removed;
+`vulnerability-exceptions.json` is empty. Expired policy still fails closed, and a
+reappearing HIGH APT finding still blocks. CI scans resolved Java dependencies,
+both exact bases and the built application image without vulnerability ignores.
+The existing SAST/misconfiguration policies and runtime UID, mounts, ports and
+health probe are unchanged. Local verification does not deploy this image to AWS.
