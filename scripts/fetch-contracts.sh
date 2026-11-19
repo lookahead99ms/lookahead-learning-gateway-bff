@@ -2,7 +2,7 @@
 # Fetch the cross-repository contracts this Gateway tests from the Content repository, read-only.
 #
 # Content is the only home of every cross-repository contract (owner decision 2026-11-05): no other
-# repository keeps a copy. This Gateway owns docs/contracts/domain-api-v1.json there and edits it in
+# repository keeps a copy. This Gateway owns contracts/domain-api-v1.json there and edits it in
 # Content first; on every pull request of this repository the file is fetched from Content main into
 # build/contracts/ (git-ignored) and DomainContractTest reads it from there.
 #
@@ -15,7 +15,7 @@
 set -eu
 
 REPOSITORY="lookahead99ms/lookahead-learning-content"
-CONTRACTS_PATH="docs/contracts"
+CONTRACTS_PATH="contracts"
 FILES="domain-api-v1.json"
 REF="${CONTENT_REF:-main}"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

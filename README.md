@@ -49,7 +49,7 @@ When upgrading Gradle, regenerate the Wrapper and update both reviewed checksums
 
 No repository clones another at build or deploy time, and no repository keeps a copy of a
 contract (owner decisions, 2026-11-05). Every cross-repository contract lives only in the
-Content repository under `docs/contracts/` (`registry.json` lists each one with its owner, master
+Content repository under `contracts/` (`registry.json` lists each one with its owner, master
 path and consumers). A consumer fetches the master files it needs from Content `main` on its
 own pull request, read-only, and runs its own tests against them. Contracts are public by
 nature; anything that would need to stay private is not a contract but configuration, and it
@@ -57,13 +57,13 @@ belongs to Infra.
 
 This Gateway owns `domain-api-v1` (`gateway-domain-contract/v1`: every Domain call this Gateway
 makes, its method, path, success statuses and the response fields the Gateway reads). A change
-to that contract is edited in Content first (`docs/contracts/domain-api-v1.json`, its own Content
+to that contract is edited in Content first (`contracts/domain-api-v1.json`, its own Content
 pull request), then this repository's pull request follows and is tested against the merged
 master; Domain (`DomainProviderContractTest`) and Web (`check-gateway-contract.mjs`) adopt it after.
 
 | Contract | Owner | Fetched to | Checked on this repo's PR by | What a failure means |
 | --- | --- | --- | --- | --- |
-| `domain-api-v1.json` (master: Content `docs/contracts/domain-api-v1.json`) | this Gateway | `build/contracts/domain-api-v1.json` by `scripts/fetch-contracts.sh` (git-ignored, kept by `clean`) | `DomainContractTest`: the entries are well formed and unique, each proxied example is driven through `GatewayController.proxy` against a mock Domain and relays the listed status, the cloud sign-in actions match the call sites, every Domain path literal in `src/main/java` is listed, and the web paths are exactly the destinations the Gateway sends browsers to | The file is missing: the fetch step did not run, or could not (see below). A Gateway call is not in the contract, or a listed example is not relayed as listed: the master in Content is behind this Gateway's calls, or this pull request changed a call without editing the master first |
+| `domain-api-v1.json` (master: Content `contracts/domain-api-v1.json`) | this Gateway | `build/contracts/domain-api-v1.json` by `scripts/fetch-contracts.sh` (git-ignored, kept by `clean`) | `DomainContractTest`: the entries are well formed and unique, each proxied example is driven through `GatewayController.proxy` against a mock Domain and relays the listed status, the cloud sign-in actions match the call sites, every Domain path literal in `src/main/java` is listed, and the web paths are exactly the destinations the Gateway sends browsers to | The file is missing: the fetch step did not run, or could not (see below). A Gateway call is not in the contract, or a listed example is not relayed as listed: the master in Content is behind this Gateway's calls, or this pull request changed a call without editing the master first |
 
 How the fetch works: `scripts/fetch-contracts.sh` reads the master through the GitHub contents
 API (`Accept: application/vnd.github.raw+json`) and writes `build/contracts/`. In CI the step
