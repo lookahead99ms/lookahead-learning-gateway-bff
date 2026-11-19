@@ -45,7 +45,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 /**
  * DLV-968 T13: the Gateway owns {@code domain-api-v1.json}, the list of every Domain call it makes. The master lives
- * only in the Content repository ({@code docs/contracts/domain-api-v1.json}, owner decision 2026-11-05) and is fetched
+ * only in the Content repository ({@code contracts/domain-api-v1.json}, owner decision 2026-11-05) and is fetched
  * by {@code scripts/fetch-contracts.sh} into {@code build/contracts/} (or the folder named by {@code -Dcontracts.dir})
  * before the tests run. Each example is driven through the Gateway's own code against a mock Domain, and every Domain
  * path literal in {@code src/main/java} must be covered by the file, so neither side can drift silently.
@@ -252,7 +252,7 @@ class DomainContractTest {
             }
         }
         assertThat(literals).isGreaterThan(30);
-        assertThat(uncovered).as("Domain path literals missing from domain-api-v1.json (Content docs/contracts, fetched to build/contracts)").isEmpty();
+        assertThat(uncovered).as("Domain path literals missing from domain-api-v1.json (Content contracts, fetched to build/contracts)").isEmpty();
     }
 
     @Test void webPathsAreExactlyTheDestinationsTheGatewaySendsBrowsersTo() throws Exception {
