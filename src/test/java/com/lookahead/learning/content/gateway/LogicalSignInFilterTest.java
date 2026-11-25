@@ -151,4 +151,105 @@ class LogicalSignInFilterTest {
         assertThat(call.apply("account", "/bff/api/v1/plans")).isTrue();              // a minute later, asks again (6)
         server.verify();
     }
+
+    // ---- One check at a time per session (the 500 on 4300, 2026-11-25)
+    static final OAuthSettings SETTINGS = new OAuthSettings("http://localhost", "test", "synthetic-secret", "http://identity", "http://domain", "http://localhost");
+    static OAuth2AuthorizedClient signedIn() {
+        var registration = ClientRegistration.withRegistrationId("lookahead").clientId("test")
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE).redirectUri("http://localhost/callback")
+                .authorizationUri("http://localhost/authorize").tokenUri("http://localhost/token").build();
+        return new OAuth2AuthorizedClient(registration, "account",
+                new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER, "server-only-token", Instant.now(), Instant.now().plusSeconds(300)));
+    }
+    /** One request of the signed-in person on its own thread; answers the status, or 200 when the chain was reached. */
+    static java.util.concurrent.Future<Integer> send(java.util.concurrent.ExecutorService threads, LogicalSignInFilter filter, MockHttpSession session, String method, String path) {
+        return threads.submit(() -> {
+            SecurityContextHolder.getContext().setAuthentication(
+                    new OAuth2AuthenticationToken(new DefaultOAuth2User(Set.of(), Map.of("sub", "account"), "sub"), Set.of(), "lookahead"));
+            try {
+                var request = new MockHttpServletRequest(method, path); request.setSession(session);
+                var response = new MockHttpServletResponse(); var reached = new AtomicBoolean();
+                filter.doFilter(request, response, (req, res) -> reached.set(true));
+                return reached.get() ? 200 : response.getStatus();
+            } finally { SecurityContextHolder.clearContext(); }
+        });
+    }
+
+    @org.junit.jupiter.api.Test
+    void requestsOfOneSessionAreCheckedOneAtATimeAndAWaitingReadUsesTheResult() throws Exception {
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(), requestTo("http://domain/api/v1/auth/me")).andRespond(withStatus(HttpStatus.OK));
+        var manager = mock(OAuth2AuthorizedClientManager.class);
+        var firstInside = new java.util.concurrent.CountDownLatch(1); var release = new java.util.concurrent.CountDownLatch(1);
+        var checks = new java.util.concurrent.atomic.AtomicInteger();
+        when(manager.authorize(any())).thenAnswer(call -> {
+            checks.incrementAndGet(); firstInside.countDown();
+            assertThat(release.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            return signedIn();
+        });
+        var filter = new LogicalSignInFilter(manager, builder.build(), SETTINGS);
+        var session = new MockHttpSession();
+        var threads = java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            var first = send(threads, filter, session, "GET", "/bff/api/v1/admin/test-accounts");
+            assertThat(firstInside.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var waiting = java.util.List.of(send(threads, filter, session, "GET", "/bff/api/v1/admin/accounts"),
+                    send(threads, filter, session, "GET", "/bff/api/v1/admin/access"), send(threads, filter, session, "GET", "/bff/api/v1/admin/access/catalog"));
+            Thread.sleep(150); // the three wait behind the first: none of them may start its own check
+            assertThat(checks.get()).isEqualTo(1);
+            release.countDown();
+            assertThat(first.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(200);
+            for (var request : waiting) assertThat(request.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(200);
+            assertThat(checks.get()).as("the readers that waited used the first request's result").isEqualTo(1);
+            assertThat(session.isInvalid()).isFalse();
+            server.verify();
+        } finally { threads.shutdownNow(); }
+    }
+
+    @org.junit.jupiter.api.Test
+    void aRequestThatWaitedWhileTheSignInEndedIsToldToSignInAgainNotAnError() throws Exception {
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(), requestTo("http://domain/api/v1/auth/me")).andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+        var manager = mock(OAuth2AuthorizedClientManager.class);
+        var firstInside = new java.util.concurrent.CountDownLatch(1); var release = new java.util.concurrent.CountDownLatch(1);
+        when(manager.authorize(any())).thenAnswer(call -> { firstInside.countDown(); release.await(5, java.util.concurrent.TimeUnit.SECONDS); return signedIn(); });
+        var filter = new LogicalSignInFilter(manager, builder.build(), SETTINGS);
+        var session = new MockHttpSession();
+        var threads = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var first = send(threads, filter, session, "GET", "/bff/api/v1/admin/access");
+            assertThat(firstInside.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var second = send(threads, filter, session, "GET", "/bff/api/v1/admin/test-accounts");
+            Thread.sleep(100);
+            release.countDown();
+            assertThat(first.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(401);
+            assertThat(second.get(5, java.util.concurrent.TimeUnit.SECONDS)).as("401 Sign in again, never a 500").isEqualTo(401);
+            assertThat(session.isInvalid()).isTrue();
+            verify(manager, times(1)).authorize(any());
+            server.verify();
+        } finally { threads.shutdownNow(); }
+    }
+
+    @org.junit.jupiter.api.Test
+    void aSessionThatEndsWhileItIsCheckedAnswersSignInAgain() throws Exception {
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("http://domain/api/v1/auth/me")).andRespond(withStatus(HttpStatus.OK));
+        var manager = mock(OAuth2AuthorizedClientManager.class);
+        var session = new MockHttpSession();
+        // The person signs out in another tab while this request's check is on its way.
+        when(manager.authorize(any())).thenAnswer(call -> { session.invalidate(); return signedIn(); });
+        SecurityContextHolder.getContext().setAuthentication(
+                new OAuth2AuthenticationToken(new DefaultOAuth2User(Set.of(), Map.of("sub", "account"), "sub"), Set.of(), "lookahead"));
+        var request = new MockHttpServletRequest("GET", "/bff/api/v1/plans"); request.setSession(session);
+        var response = new MockHttpServletResponse(); var reached = new AtomicBoolean();
+        var lines = capture(() -> new LogicalSignInFilter(manager, builder.build(), SETTINGS).doFilter(request, response, (req, res) -> reached.set(true)));
+        assertThat(reached.get()).isFalse();
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("AUTHENTICATION_REQUIRED");
+        assertThat(lines).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).containsExactly(
+                "Sign-in check failed for GET /bff/api/v1/plans: SESSION_ENDED, the session ended while the sign-in was being checked; the learner sign-in ends");
+    }
 }

@@ -73,8 +73,8 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
         boolean api = session != null && request.getRequestURI().startsWith("/bff/api/v1/");
         boolean read = "GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod());
         boolean reusable = api && read && !request.getRequestURI().equals("/bff/api/v1/auth/csrf");
-        if (reusable && session.getAttribute(CHECKED) instanceof Checked checked && checked.person().equals(authentication.getName())
-                && clock.instant().isBefore(checked.at().plus(REUSE))) {
+        String person = authentication.getName();
+        if (reusable && Boolean.TRUE.equals(passedRecently(session, person))) {
             chain.doFilter(request, response);
             return;
         }
@@ -83,28 +83,48 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
         String reason, why;
         String types = null;
         Integer domain = null;
-        try {
-            var client = clients.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead")
-                    .principal(authentication).attributes(attributes -> {
-                        attributes.put(HttpServletRequest.class.getName(), request);
-                        attributes.put(HttpServletResponse.class.getName(), response);
-                    }).build());
-            status = client == null ? 401 : http.get().uri(settings.domainApiUpstream() + "/api/v1/auth/me")
-                    .headers(headers -> {headers.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,headers);})
-                    .exchange((sent, received) -> received.getStatusCode().value());
-            if (client == null) { reason = "NO_PROVIDER_TOKENS"; why = "this session holds no provider tokens"; }
-            else { domain = status; reason = status == 401 ? "DOMAIN_SIGN_IN_ENDED" : "DOMAIN_CHECK_FAILED";
-                why = status == 401 ? "Domain says this sign-in has ended or was revoked" : "Domain answered HTTP " + status; }
-        } catch (OAuth2AuthorizationException rejected) {
-            status = "invalid_grant".equals(rejected.getError().getErrorCode()) ? 401 : 503;
-            reason = status == 401 ? "SESSION_EXPIRED" : "TOKEN_REFRESH_FAILED";
-            why = status == 401 ? "Cognito refused the refresh token (invalid_grant)" : "the token refresh did not succeed";
-        } catch (RuntimeException unavailable) {
-            status = 503;
-            reason = "DOMAIN_UNAVAILABLE"; types = RequestLog.types(unavailable); why = "Domain did not answer (" + types + ")";
+        /*
+         * One check at a time for a session. A page sends several requests at once; when the access token was due for
+         * renewal, each of them renewed it on its own, the renewal of one made the token of another invalid, that one
+         * ended the session, and the ones that had passed then failed with a 500 on the ended session. Now the first
+         * request renews and checks; the ones that waited find its result (a read), or check with the renewed token.
+         */
+        synchronized (mutex(session)) {
+            Boolean recent = session == null ? Boolean.FALSE : passedRecently(session, person);
+            if (recent == null) {
+                status = 401; reason = "SESSION_ENDED"; why = "another request of this session ended the sign-in a moment ago";
+            } else if (reusable && recent) {
+                status = 200; reason = why = null;
+            } else {
+                try {
+                    var client = clients.authorize(OAuth2AuthorizeRequest.withClientRegistrationId("lookahead")
+                            .principal(authentication).attributes(attributes -> {
+                                attributes.put(HttpServletRequest.class.getName(), request);
+                                attributes.put(HttpServletResponse.class.getName(), response);
+                            }).build());
+                    status = client == null ? 401 : http.get().uri(settings.domainApiUpstream() + "/api/v1/auth/me")
+                            .headers(headers -> {headers.setBearerAuth(client.getAccessToken().getTokenValue());CloudGatewaySessions.apply(settings,request,headers);})
+                            .exchange((sent, received) -> received.getStatusCode().value());
+                    if (client == null) { reason = "NO_PROVIDER_TOKENS"; why = "this session holds no provider tokens"; }
+                    else { domain = status; reason = status == 401 ? "DOMAIN_SIGN_IN_ENDED" : "DOMAIN_CHECK_FAILED";
+                        why = status == 401 ? "Domain says this sign-in has ended or was revoked" : "Domain answered HTTP " + status; }
+                } catch (OAuth2AuthorizationException rejected) {
+                    status = "invalid_grant".equals(rejected.getError().getErrorCode()) ? 401 : 503;
+                    reason = status == 401 ? "SESSION_EXPIRED" : "TOKEN_REFRESH_FAILED";
+                    why = status == 401 ? "Cognito refused the refresh token (invalid_grant)" : "the token refresh did not succeed";
+                } catch (RuntimeException unavailable) {
+                    status = 503;
+                    reason = "DOMAIN_UNAVAILABLE"; types = RequestLog.types(unavailable); why = "Domain did not answer (" + types + ")";
+                }
+                if (status == 200 && api && !remember(session, person)) {
+                    // Signed out (or ended) while this check was on its way: the answer is "sign in again", never a 500.
+                    status = 401; reason = "SESSION_ENDED"; why = "the session ended while the sign-in was being checked";
+                } else if (status == 401) {
+                    DevAdmission.clearLearner(request);
+                }
+            }
         }
         if (status == 200) {
-            if (api) session.setAttribute(CHECKED, new Checked(authentication.getName(), clock.instant()));
             chain.doFilter(request, response);
             return;
         }
@@ -114,14 +134,41 @@ final class LogicalSignInFilter extends OncePerRequestFilter {
         if (types != null) line = line.addKeyValue("exception.types", types);
         line.log(status == 401 ? "Sign-in check failed for {} {}: {}, {}; the learner sign-in ends" : "Sign-in check failed for {} {}: {}, {}; answered 503",
                 RequestLog.method(request), RequestLog.path(request), reason, why);
-        if (status == 401) {
-            DevAdmission.clearLearner(request);
-        }
         response.setStatus(status == 401 ? 401 : 503);
         response.setHeader("Cache-Control", "no-store");
         response.setContentType("application/json");
         response.getWriter().write(status == 401
                 ? "{\"code\":\"AUTHENTICATION_REQUIRED\",\"message\":\"Sign in again.\"}"
                 : "{\"code\":\"SERVICE_UNAVAILABLE\",\"message\":\"Sign-in verification is temporarily unavailable.\"}");
+    }
+
+    /** The lock of one session's checks; a request without a session checks on its own. */
+    private static Object mutex(jakarta.servlet.http.HttpSession session) {
+        if (session == null) return new Object();
+        try {
+            return org.springframework.web.util.WebUtils.getSessionMutex(session);
+        } catch (IllegalStateException ended) {
+            return session;
+        }
+    }
+
+    /** Whether this session passed a check for this person within {@link #REUSE}; null when the session has ended. */
+    private Boolean passedRecently(jakarta.servlet.http.HttpSession session, String person) {
+        try {
+            return session.getAttribute(CHECKED) instanceof Checked checked && checked.person().equals(person)
+                    && clock.instant().isBefore(checked.at().plus(REUSE));
+        } catch (IllegalStateException ended) {
+            return null;
+        }
+    }
+
+    /** Records the passed check on the session; false when the session ended meanwhile. */
+    private boolean remember(jakarta.servlet.http.HttpSession session, String person) {
+        try {
+            session.setAttribute(CHECKED, new Checked(person, clock.instant()));
+            return true;
+        } catch (IllegalStateException ended) {
+            return false;
+        }
     }
 }
