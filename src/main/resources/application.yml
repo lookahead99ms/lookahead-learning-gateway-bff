@@ -12,6 +12,12 @@ server:
   port: ${PORT:8080}
   shutdown: graceful
   forward-headers-strategy: none
+  # The Gateway answers the browser, so it compresses: the Delivery Plan (3.4 MB of JSON) and the admin lists travel
+  # as gzip, about a quarter of the size. Small answers (the CSRF token, session checks) are left as they are.
+  compression:
+    enabled: true
+    mime-types: application/json,application/problem+json,text/plain,text/html,text/css,application/javascript,image/svg+xml
+    min-response-size: 2KB
   servlet:
     session:
       timeout: 30m
