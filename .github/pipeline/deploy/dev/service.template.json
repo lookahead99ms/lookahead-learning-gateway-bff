@@ -1,0 +1,412 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DLV-968: the DEV gateway application, one ECS service with rolling updates, owned by the gateway-bff repository: task definition family lookahead-dev-gateway and ECS service lookahead-dev-gateway on the existing cluster, network, log group, credentials and IAM roles; nothing else is created. The service registers in the existing NLB target group lookahead-dev-gateway-blue (TargetGroupArn, decision V); the green group leaves with the ingress stack in phase 3.",
+  "Metadata": {
+    "Owner": "lookahead99ms/lookahead-learning-gateway-bff",
+    "Ticket": "DLV-968",
+    "Resources": [
+      "AWS::ECS::TaskDefinition lookahead-dev-gateway",
+      "AWS::ECS::Service lookahead-dev-gateway"
+    ],
+    "Deploy": ".github/pipeline/deploy/deploy.py renders one change set app-<run> against this template; a deploy is an ECS rolling update (surge to two tasks, circuit-breaker rollback); DesiredCount 1 serves, 0 parks the service (user decision V, 2026-11-01)",
+    "HealthCheck": "Spring Boot starts in 75-90 s on 512 CPU units; a 60 s start period with 3 retries killed healthy tasks (Domain run 41327104117, 2026-11-01), so the grace is 180 s plus 5 retries."
+  },
+  "Parameters": {
+    "Cluster": {
+      "Type": "String"
+    },
+    "ApplicationSubnets": {
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "ServiceSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    },
+    "ApplicationImage": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/[a-z0-9/_-]+@sha256:[a-f0-9]{64}"
+    },
+    "TaskRoleArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:iam::[0-9]{12}:role/[a-zA-Z0-9+=,.@_/-]+"
+    },
+    "ExecutionRoleArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:iam::[0-9]{12}:role/[a-zA-Z0-9+=,.@_/-]+"
+    },
+    "TlsSecretArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[a-zA-Z0-9/_+=.@-]+"
+    },
+    "TlsVersion": {
+      "Type": "String",
+      "MinLength": 32,
+      "MaxLength": 64,
+      "AllowedPattern": "[a-zA-Z0-9-]+"
+    },
+    "TargetGroupArn": {
+      "Type": "String"
+    },
+    "LogGroupName": {
+      "Type": "String"
+    },
+    "PublicHostname": {
+      "Type": "String",
+      "AllowedPattern": "[a-z0-9][a-z0-9.-]+\\.[a-z]{2,}"
+    },
+    "GatewayClientSecretArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[a-zA-Z0-9/_+=.@-]+"
+    },
+    "GatewayIdentityVersion": {
+      "Type": "String",
+      "MinLength": 32,
+      "MaxLength": 64,
+      "AllowedPattern": "[a-zA-Z0-9-]+"
+    },
+    "DomainGatewaySecretArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[a-zA-Z0-9/_+=.@-]+"
+    },
+    "DomainGatewayVersion": {
+      "Type": "String",
+      "MinLength": 32,
+      "MaxLength": 64,
+      "AllowedPattern": "[a-zA-Z0-9-]+"
+    },
+    "ApplicationIssuer": {
+      "Type": "String"
+    },
+    "ScopePrefix": {
+      "Type": "String"
+    },
+    "ApplicationManagedLogin": {
+      "Type": "String"
+    },
+    "DevStateTable": {
+      "Type": "String"
+    },
+    "RefreshToken": {
+      "Type": "String",
+      "Default": "none",
+      "AllowedPattern": "^[A-Za-z0-9-]{1,64}$",
+      "Description": "Changed only by an APPROVE REFRESH answer in 04 \u00b7 Deploy DEV: a new value registers a new task definition revision with the same image, so ECS restarts the task (Domain re-reads the content release in S3)"
+    },
+    "DesiredCount": {
+      "Type": "Number",
+      "AllowedValues": [
+        0,
+        1
+      ],
+      "Default": 0
+    }
+  },
+  "Resources": {
+    "Task": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "Family": "lookahead-dev-gateway",
+        "RequiresCompatibilities": [
+          "FARGATE"
+        ],
+        "NetworkMode": "awsvpc",
+        "Cpu": "512",
+        "Memory": "1024",
+        "RuntimePlatform": {
+          "OperatingSystemFamily": "LINUX",
+          "CpuArchitecture": "X86_64"
+        },
+        "TaskRoleArn": {
+          "Ref": "TaskRoleArn"
+        },
+        "ExecutionRoleArn": {
+          "Ref": "ExecutionRoleArn"
+        },
+        "Volumes": [
+          {
+            "Name": "applicationTmp"
+          }
+        ],
+        "ContainerDefinitions": [
+          {
+            "Name": "gateway",
+            "Image": {
+              "Ref": "ApplicationImage"
+            },
+            "User": "10001:10001",
+            "ReadonlyRootFilesystem": true,
+            "LinuxParameters": {
+              "Capabilities": {
+                "Drop": [
+                  "ALL"
+                ]
+              }
+            },
+            "StopTimeout": 30,
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "LogGroupName"
+                },
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-stream-prefix": "gateway",
+                "mode": "non-blocking",
+                "max-buffer-size": "4m"
+              }
+            },
+            "Essential": true,
+            "StartTimeout": 180,
+            "PortMappings": [
+              {
+                "ContainerPort": 8443,
+                "Protocol": "tcp"
+              }
+            ],
+            "MountPoints": [
+              {
+                "SourceVolume": "applicationTmp",
+                "ContainerPath": "/tmp",
+                "ReadOnly": false
+              }
+            ],
+            "Secrets": [
+              {
+                "Name": "LOOKAHEAD_TLS_SCHEMA",
+                "ValueFrom": {
+                  "Fn::Sub": "${TlsSecretArn}:schema::${TlsVersion}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_TLS_SERVER_CERTIFICATE",
+                "ValueFrom": {
+                  "Fn::Sub": "${TlsSecretArn}:serverCertificate::${TlsVersion}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_TLS_SERVER_KEY",
+                "ValueFrom": {
+                  "Fn::Sub": "${TlsSecretArn}:serverKey::${TlsVersion}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_TLS_TRUST",
+                "ValueFrom": {
+                  "Fn::Sub": "${TlsSecretArn}:trust::${TlsVersion}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_TLS_CLIENT_CERTIFICATE",
+                "ValueFrom": {
+                  "Fn::Sub": "${TlsSecretArn}:clientCertificate::${TlsVersion}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_TLS_CLIENT_KEY",
+                "ValueFrom": {
+                  "Fn::Sub": "${TlsSecretArn}:clientKey::${TlsVersion}"
+                }
+              },
+              {
+                "Name": "APP_OAUTH_CLIENT_ID",
+                "ValueFrom": {
+                  "Fn::Sub": "${GatewayClientSecretArn}:clientId::${GatewayIdentityVersion}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_GATEWAY_CLIENT_SECRET",
+                "ValueFrom": {
+                  "Fn::Sub": "${GatewayClientSecretArn}:clientSecret::${GatewayIdentityVersion}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_DOMAIN_GATEWAY_SECRET",
+                "ValueFrom": {
+                  "Fn::Sub": "${DomainGatewaySecretArn}:::${DomainGatewayVersion}"
+                }
+              }
+            ],
+            "Environment": [
+              {
+                "Name": "LOOKAHEAD_DEPLOY_REFRESH",
+                "Value": {
+                  "Ref": "RefreshToken"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_ENVIRONMENT",
+                "Value": "dev"
+              },
+              {
+                "Name": "LOOKAHEAD_RUNTIME_MODE",
+                "Value": "lower-cost-dev"
+              },
+              {
+                "Name": "LOOKAHEAD_TLS_SERVER_NAME",
+                "Value": {
+                  "Ref": "PublicHostname"
+                }
+              },
+              {
+                "Name": "SPRING_PROFILES_ACTIVE",
+                "Value": "lower-cost-dev"
+              },
+              {
+                "Name": "JAVA_TOOL_OPTIONS",
+                "Value": "-Djava.security.properties=/opt/lookahead/dns.security -Djdk.httpclient.keepalive.timeout=30 -Djdk.httpclient.disableRetryConnect=true"
+              },
+              {
+                "Name": "AWS_REGION",
+                "Value": {
+                  "Ref": "AWS::Region"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_COGNITO_ISSUER",
+                "Value": {
+                  "Ref": "ApplicationIssuer"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_COGNITO_SCOPE_PREFIX",
+                "Value": {
+                  "Ref": "ScopePrefix"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_FRONTEND_ORIGIN",
+                "Value": {
+                  "Fn::Sub": "https://${PublicHostname}"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_COGNITO_MANAGED_LOGIN",
+                "Value": {
+                  "Ref": "ApplicationManagedLogin"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_GOOGLE_SIGN_IN",
+                "Value": "true"
+              },
+              {
+                "Name": "LOOKAHEAD_DEV_STATE_TABLE",
+                "Value": {
+                  "Ref": "DevStateTable"
+                }
+              },
+              {
+                "Name": "LOOKAHEAD_DOMAIN_UPSTREAM",
+                "Value": "https://domain.lookahead-dev.internal:8443"
+              },
+              {
+                "Name": "LOOKAHEAD_WEB_UPSTREAM",
+                "Value": "https://web.lookahead-dev.internal:8443"
+              },
+              {
+                "Name": "LOOKAHEAD_DOMAIN_TRANSPORT",
+                "Value": "application-mtls"
+              },
+              {
+                "Name": "APP_AUTHOR_PREVIEWS_ENABLED",
+                "Value": "false"
+              }
+            ],
+            "HealthCheck": {
+              "Command": [
+                "CMD",
+                "java",
+                "-Xms16m",
+                "-Xmx64m",
+                "-cp",
+                "/opt/lookahead/health",
+                "com.lookahead.gateway.health.ContainerHealthcheck"
+              ],
+              "Interval": 15,
+              "Timeout": 5,
+              "Retries": 5,
+              "StartPeriod": 180
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "LookAheadEnvironment",
+            "Value": "dev"
+          }
+        ]
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "Service": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "ServiceName": "lookahead-dev-gateway",
+        "Cluster": {
+          "Ref": "Cluster"
+        },
+        "TaskDefinition": {
+          "Ref": "Task"
+        },
+        "DesiredCount": {
+          "Ref": "DesiredCount"
+        },
+        "LaunchType": "FARGATE",
+        "PlatformVersion": "1.4.0",
+        "EnableExecuteCommand": false,
+        "DeploymentConfiguration": {
+          "MinimumHealthyPercent": 100,
+          "MaximumPercent": 200,
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true
+          }
+        },
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "ENABLED",
+            "Subnets": {
+              "Ref": "ApplicationSubnets"
+            },
+            "SecurityGroups": [
+              {
+                "Ref": "ServiceSecurityGroup"
+              }
+            ]
+          }
+        },
+        "LoadBalancers": [
+          {
+            "ContainerName": "gateway",
+            "ContainerPort": 8443,
+            "TargetGroupArn": {
+              "Ref": "TargetGroupArn"
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "LookAheadEnvironment",
+            "Value": "dev"
+          }
+        ]
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    }
+  },
+  "Outputs": {
+    "ServiceArn": {
+      "Value": {
+        "Ref": "Service"
+      }
+    },
+    "TaskDefinitionArn": {
+      "Value": {
+        "Ref": "Task"
+      }
+    }
+  }
+}

@@ -81,7 +81,7 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
-    // DLV-968: the cross-repository contracts live only in the Content repository; scripts/fetch-contracts.sh writes
+    // DLV-968: the cross-repository contracts live only in the Content repository; .github/pipeline/build/fetch-contracts.sh writes
     // them to build/contracts/ and DomainContractTest reads them there. -PcontractsDir=<folder> points it elsewhere.
     systemProperty 'contracts.dir', providers.gradleProperty('contractsDir').orElse('build/contracts').get()
 }
@@ -129,7 +129,7 @@ tasks.named('check') {
 }
 
 springBoot {
-    mainClass = 'com.lookahead.gateway.GatewayApplication'
+    mainClass = 'com.lookahead.gateway.GatewayBffApplication'
     // DLV-914: /actuator/info reports build.version (releaseVersion), the calendar release tag and the Git commit.
     buildInfo {
         properties {

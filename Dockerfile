@@ -9,7 +9,7 @@ COPY gradle/wrapper/ gradle/wrapper/
 RUN ./gradlew --no-daemon --version
 COPY build.gradle settings.gradle ./
 COPY src/ src/
-# DLV-968: the Domain API contract lives only in the Content repository; run scripts/fetch-contracts.sh before
+# DLV-968: the Domain API contract lives only in the Content repository; run .github/pipeline/build/fetch-contracts.sh before
 # `docker build` so build/contracts/ exists (CI fetches it first). DomainContractTest reads it during `test`.
 COPY build/contracts/ build/contracts/
 # DLV-914: the jar is lookahead-gateway-<version>.jar and /actuator/info reports version, release tag and commit.
@@ -30,7 +30,7 @@ RUN groupadd --gid 10001 lookahead && useradd --uid 10001 --gid 10001 --no-creat
     && chown 10001:10001 /tmp && chmod 1777 /tmp
 COPY --from=build --chown=10001:10001 /workspace/build/libs/lookahead-gateway-${BUILD_VERSION}.jar /opt/lookahead/app.jar
 COPY --from=build --chown=10001:10001 /workspace/health /opt/lookahead/health
-COPY deployment/container/dns.security /opt/lookahead/dns.security
+COPY .github/pipeline/build/container/dns.security /opt/lookahead/dns.security
 # ECS copies a VOLUME path's ownership into the task's empty bind mount; without it the Fargate
 # mount at /tmp is root-owned 0755 and Tomcat (UID 10001) cannot create its tempDir (DLV-968). /tmp keeps the
 # conventional sticky 1777 mode: Docker gives an unparameterised tmpfs the directory's mode, so local stacks that

@@ -34,6 +34,11 @@ import java.util.regex.Pattern;
  * millis> <LEVEL padded to 5> <sentence>}", with the reason code, the failures in a row and the seconds down in words.
  * A failing probe is WARN (the task is not serving yet, or is stopping); the word ERROR never appears, since the deploy's
  * log scan treats it as a failed start.
+ *
+ * <p>Exception, decided 2026-11-25 (DLV-1015): this class makes an HTTP call outside {@code client} (rule 4: only a
+ * client class talks to an outside system). It is the stand-alone probe program the container runs in its own JVM
+ * against the application's loopback address, compiled on its own for the image, so it cannot use the application's
+ * classes.
  */
 public final class ContainerHealthcheck {
     static final URI READINESS_URI = URI.create("http://127.0.0.1:8080/actuator/health/readiness");
@@ -65,14 +70,6 @@ public final class ContainerHealthcheck {
     record Result(int code, String reason, String words) {
         static final Result PASSED = new Result(0, "READY", "readiness answered UP");
         static Result failed(String reason, String words) { return new Result(1, reason, words); }
-    }
-
-    static int check(URI readinessUri) {
-        return check(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), readinessUri);
-    }
-
-    static int check(HttpClient client, URI readinessUri) {
-        return probe(client, readinessUri).code();
     }
 
     static Result probe(HttpClient client, URI readinessUri) {

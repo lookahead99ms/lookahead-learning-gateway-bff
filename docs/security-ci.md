@@ -7,15 +7,15 @@ The existing `verify` job builds and tests this application, runs CodeQL securit
 From this repository with Java 21, Python 3 and Docker available:
 
 ```sh
-python3 -m unittest discover -s tools/security -p 'test_*.py'
-python3 tools/security/check.py install --tool trivy
-python3 tools/security/check.py install --tool gitleaks
-python3 tools/security/check.py history
-python3 tools/security/check.py dependencies --build-system gradle
-python3 tools/security/check.py sbom
-python3 tools/security/check.py config
+python3 -m unittest discover -s .github/pipeline/build -p 'test_checks.py'
+python3 .github/pipeline/build/check.py install --tool trivy
+python3 .github/pipeline/build/check.py install --tool gitleaks
+python3 .github/pipeline/build/check.py history
+python3 .github/pipeline/build/check.py dependencies --build-system gradle
+python3 .github/pipeline/build/check.py sbom
+python3 .github/pipeline/build/check.py config
 docker build --pull --tag lookahead-gateway-bff:security-ci-local .
-python3 tools/security/check.py images --image lookahead-gateway-bff:security-ci-local
+python3 .github/pipeline/build/check.py images --image lookahead-gateway-bff:security-ci-local
 ```
 
 The installer verifies pinned archive checksums. Supported tool hosts are Linux AMD64 and macOS ARM64. Network access is required for dependency resolution, scanner databases and rule updates. History checks reject shallow repositories; fetch the complete intended history first. They inspect fetched refs, not inaccessible remote history.
@@ -108,7 +108,7 @@ expired policy. Review again before renewal; do not roll dates forward automatic
 ### Gateway actuator-info exception binding — 2026-10-27
 
 DLV-914 adds only the GET `/actuator/info` permit matcher and its comment to the
-exception-bound `GatewayConfiguration.java`. The local Identity pass-through
+exception-bound `SecurityFilterChainConfiguration.java`. The local Identity pass-through
 chain and BFF session CSRF configuration are unchanged. After reviewing that
 diff and running the complete Gateway checks, the CSRF exception is rebound to
 the current source; its rule, path and October 28 expiry remain unchanged.

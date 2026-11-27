@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import java.io.PrintStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -69,7 +70,7 @@ class ContainerHealthcheckTest {
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });
-        assertEquals(expected, ContainerHealthcheck.check(uri));
+        assertEquals(expected, ContainerHealthcheck.probe(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), uri).code());
         assertEquals(1, gets.get());
     }
 
@@ -95,25 +96,25 @@ class ContainerHealthcheckTest {
             exchange.getResponseBody().write(body);
             exchange.close();
         });
-        assertEquals(1, ContainerHealthcheck.check(uri));
+        assertEquals(1, ContainerHealthcheck.probe(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), uri).code());
         assertEquals(0, redirected.get());
     }
 
     @Test void connectionFailureIsUnhealthy() {
         server.stop(0);
         server = null;
-        assertEquals(1, ContainerHealthcheck.check(uri));
+        assertEquals(1, ContainerHealthcheck.probe(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), uri).code());
     }
 
     @Test void invalidRequestUriIsUnhealthy() {
-        assertEquals(1, ContainerHealthcheck.check(URI.create("file:///not-a-probe")));
+        assertEquals(1, ContainerHealthcheck.probe(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build(), URI.create("file:///not-a-probe")).code());
     }
 
     @Test void timeoutIsUnhealthyAndRequestIsBounded() throws Exception {
         HttpClient client = mock(HttpClient.class);
         when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenThrow(new HttpTimeoutException("synthetic timeout"));
-        assertEquals(1, ContainerHealthcheck.check(client, uri));
+        assertEquals(1, ContainerHealthcheck.probe(client, uri).code());
         ArgumentCaptor<HttpRequest> request = ArgumentCaptor.forClass(HttpRequest.class);
         verify(client).send(request.capture(), any(HttpResponse.BodyHandler.class));
         assertEquals(Duration.ofSeconds(3), request.getValue().timeout().orElseThrow());
@@ -126,7 +127,7 @@ class ContainerHealthcheckTest {
         when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenThrow(new InterruptedException("synthetic interruption"));
         try {
-            assertEquals(1, ContainerHealthcheck.check(client, uri));
+            assertEquals(1, ContainerHealthcheck.probe(client, uri).code());
             assertTrue(Thread.currentThread().isInterrupted());
         } finally {
             Thread.interrupted();
@@ -243,7 +244,7 @@ class ContainerHealthcheckTest {
         var refused = ContainerHealthcheck.Result.failed("CONNECTION_REFUSED", "nothing is listening");
         var originalErr = System.err;
         var err = new ByteArrayOutputStream();
-        System.setErr(new java.io.PrintStream(err, true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
         try {
             // The application's stdout cannot be opened: the line goes to this probe's stderr instead.
             ContainerHealthcheck.report(refused, uri, directory.resolve("state"), () -> { throw new IOException("synthetic"); }, Instant.now());
