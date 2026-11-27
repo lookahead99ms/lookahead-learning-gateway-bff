@@ -13,7 +13,8 @@ account deletion remains unavailable in Domain.
 Java 21 / Spring Boot Backend for Frontend (BFF) for the Angular application.
 It owns browser sessions, server-held
 OAuth tokens and fixed routing to Identity and the Learning Domain API. It has no database
-connection or private signing key.
+of its own and no private signing key; in DEV it reads one DynamoDB item, the DEV session status,
+through `db/store/DevSessionStore`.
 
 ## Build and test one checkout
 
@@ -23,13 +24,14 @@ project artifact is required. Dependencies come from Maven Central and the
 Gradle Plugin Portal.
 
 ```sh
-./scripts/fetch-contracts.sh
+./.github/pipeline/build/fetch-contracts.sh
 ./gradlew --no-daemon clean test bootJar
 ```
 
 The first command fetches the Domain API contract from the Content repository into
 `build/contracts/` (see "Contracts with other repositories"); `DomainContractTest` reads it
-there. Windows uses `gradlew.bat`. The executable is `build/libs/lookahead-gateway.jar`;
+there. Windows uses `gradlew.bat`. The executable is `build/libs/lookahead-gateway-<version>.jar`
+(`lookahead-gateway-0.0.1-SNAPSHOT.jar` without `-PreleaseVersion`);
 test reports are in `build/reports/tests/test/index.html`. The build retains Java
 parameter names used by Spring MVC. Its Spring Boot BOM and plugin stay pinned
 to the same version in `build.gradle`.
@@ -63,9 +65,9 @@ master; Domain (`DomainProviderContractTest`) and Web (`check-gateway-contract.m
 
 | Contract | Owner | Fetched to | Checked on this repo's PR by | What a failure means |
 | --- | --- | --- | --- | --- |
-| `domain-api-v1.json` (master: Content `contracts/domain-api-v1.json`) | this Gateway | `build/contracts/domain-api-v1.json` by `scripts/fetch-contracts.sh` (git-ignored, kept by `clean`) | `DomainContractTest`: the entries are well formed and unique, each proxied example is driven through `GatewayController.proxy` against a mock Domain and relays the listed status, the cloud sign-in actions match the call sites, every Domain path literal in `src/main/java` is listed, and the web paths are exactly the destinations the Gateway sends browsers to | The file is missing: the fetch step did not run, or could not (see below). A Gateway call is not in the contract, or a listed example is not relayed as listed: the master in Content is behind this Gateway's calls, or this pull request changed a call without editing the master first |
+| `domain-api-v1.json` (master: Content `contracts/domain-api-v1.json`) | this Gateway | `build/contracts/domain-api-v1.json` by `.github/pipeline/build/fetch-contracts.sh` (git-ignored, kept by `clean`) | `DomainContractTest`: the entries are well formed and unique, each proxied example is driven through `DomainProxyController.proxy` against a mock Domain and relays the listed status, the cloud sign-in actions match the call sites, every Domain path literal in `src/main/java` is listed, and the web paths are exactly the destinations the Gateway sends browsers to | The file is missing: the fetch step did not run, or could not (see below). A Gateway call is not in the contract, or a listed example is not relayed as listed: the master in Content is behind this Gateway's calls, or this pull request changed a call without editing the master first |
 
-How the fetch works: `scripts/fetch-contracts.sh` reads the master through the GitHub contents
+How the fetch works: `.github/pipeline/build/fetch-contracts.sh` reads the master through the GitHub contents
 API (`Accept: application/vnd.github.raw+json`) and writes `build/contracts/`. In CI the step
 "Fetch contracts from Content" runs it before the Gradle tests with the repository secret
 `CONTENT_READ_TOKEN`, a fine-grained token whose only permission is Contents: read on the Content
@@ -73,7 +75,7 @@ repository; the token is never printed. Locally the script falls back to `GH_TOK
 own `gh auth login`:
 
 ```sh
-./scripts/fetch-contracts.sh
+./.github/pipeline/build/fetch-contracts.sh
 ./gradlew test --tests '*Contract*'
 ```
 
@@ -103,7 +105,7 @@ LOOKAHEAD_IDENTITY_UPSTREAM=http://127.0.0.1:14351 \
 LOOKAHEAD_DOMAIN_UPSTREAM=http://127.0.0.1:14352 \
 LOOKAHEAD_GATEWAY_COOKIE_NAME=LOOKAHEAD_SMOKE_GATEWAY \
 LOOKAHEAD_IDENTITY_COOKIE_NAME=LOOKAHEAD_SMOKE_IDENTITY \
-PORT=14350 java -jar build/libs/lookahead-gateway.jar
+PORT=14350 java -jar build/libs/lookahead-gateway-0.0.1-SNAPSHOT.jar
 ```
 
 Use a free loopback port; adjust the issuer and frontend origin together when
@@ -133,7 +135,7 @@ returns.
 Build from this repository alone:
 
 ```sh
-./scripts/fetch-contracts.sh
+./.github/pipeline/build/fetch-contracts.sh
 docker build --tag lookahead-gateway:local .
 ```
 
@@ -175,7 +177,7 @@ Gateway and Identity and between side-by-side deployments on the same hostname.
 
 Optional local author previews use `APP_AUTHOR_PREVIEWS_ENABLED`,
 `APP_AUTHOR_PREVIEWS_UPSTREAM` and the separate server-side shared key described
-by `AuthorPreviewSettings`. They stay disabled by default.
+by `AuthorPreviewUpstream`. They stay disabled by default.
 
 The repository remains
 [lookahead-learning-gateway-bff](https://github.com/lookahead99ms/lookahead-learning-gateway-bff).
@@ -206,21 +208,18 @@ capability and records append-only review history. Recording a decision does not
 edit delivery tickets, Git or GitHub. No new BFF configuration is required.
 
 
-## AWS DEV deployment candidate (DLV-810)
+## Service deployment definition
 
-`deployment/service.yaml` is the application-owned service contract for the local AWS candidate. It declares health, capacity, immutable image/release inputs and symbolic approved resource/secret references. Shared DEV/PROD values, IAM, S3, networking, CloudFormation and tooling belong to Infra. YAML uses JSON syntax. Current image/evidence values are unresolved and desired count is zero; this is not an activated cloud profile. Local configuration and authorization are preserved. See the sibling Infra `aws/devprod/README.md` for local planning commands and remaining application/identity/bootstrap gates. No resource creation, upload or GitHub activation has been performed.
-
-Deployment direction: this application owns its service YAML and future thin caller to an immutable-pinned Infra reusable workflow. The v2 manifest separates shared settings from DEV/PROD overrides. Infra owns bootstrap/IAM/security groups/templates/orchestration; see workspace Infra `docs/deployment/README.md`. Build-once digest promotion, required scans and separate DEV/PROD approvals remain gates, not enabled deployment behavior.
-
-## Service deployment configuration
-
-`deployment/service.yaml` uses `lookahead-service/v2`: `shared` owns service port, health, settings and approved resource/secret/Infra output references; `environments.dev` and `.prod` select capacity, image digest, content release and activation evidence. Both candidates retain zero tasks. Shared account/region values and all infrastructure remain Infra-owned. Infra's maintained `aws/devprod/parameter-bindings.yaml` validates every template parameter; `scripts/aws_deployment.py plan --environment dev|prod` generates an offline plan. See Infra `docs/deployment/README.md` for commands and activation gates. No application contract or Local Docker behavior changed; AWS deployment remains blocked.
-
-October8 candidate service configuration adds explicit Fargate runtime/private networking, ingress/target-group references, optional alarm references, and per-environment scaling min/max, CPU targets, cooldowns and alarm thresholds. Desired/min tasks stay0 and scaling/alarms disabled. Fargate uses CPU/memory, not an EC2 instance type. Infra owns conditional scaling/IAM/CloudWatch resources; see Infra docs/deployment/README.md.
-
-Deployment `service.yaml` now declares task startup, health probes, temporary disk, logging/rollout settings and approved environment/Secrets Manager bindings. Java DEV/PROD sections declare Xms128 MiB / Xmx512 MiB and approved JVM args for provisional 1 GiB tasks, leaving explicit native/probe budget; load testing remains required. Infra shared values and maintained templates remain authoritative; see Infra `docs/deployment/README.md` → JVM and task configuration. Local Docker/runtime behavior is unchanged and AWS activation remains blocked.
-
-AWS candidate `deployment/service.yaml` now references the shared application task role and separate shared Fargate execution role from its owning environment foundation. Active cloud applications reuse this pair; DEV/PROD have separate role resources/scopes. Infra owns policies, trust and validation; service-specific secret mappings and existing authorization are preserved. See Infra `docs/deployment/README.md` → Two shared IAM roles per environment. No cloud activation.
+This application deploys itself to DEV. Its deployment definition is
+`.github/pipeline/deploy/dev/service.template.json` (the ECS task definition and service of the stack
+`lookahead-dev-gateway`) with `.github/pipeline/deploy/dev/deploy-config.json` (cluster, stack, log group,
+load-balancer target group, role and secret-version bindings, observation window), applied by
+`.github/pipeline/deploy/deploy.py` through `04 · Deploy DEV`; `.github/pipeline/shared/README.md` describes the
+stages. "Stable DEV upstreams" below has this service's own settings. Infra owns the shared AWS resources the service
+runs on (network, cluster, IAM roles, secrets, registry). Since the owner decision of November 27, 2026 no tool or
+workflow here reads a file of the Infra repository and Infra reads no file of this one; the earlier service contract
+file in the root `deployment/` folder (`lookahead-service/v2`, the input of an offline planner Infra used to have)
+was removed that day.
 
 
 ## DEV/PROD Cognito and Domain sign-in ownership
@@ -306,11 +305,13 @@ Provider fixtures and generated keys are synthetic. These checks do not certify
 live Cognito login/token exchange, external TLS certificates, private network
 reachability, ECS secret delivery, deployed cookie/proxy behavior or multi-instance
 recovery. Those remain deployment integration checks. The Gateway owns no
-database connection; store connectivity and readiness tests belong to Domain (DynamoDB only since 2026-11-17).
+database; in DEV it only reads one DynamoDB item, the DEV session status, through `db/store/DevSessionStore`
+(`DevSessionStoreTest` covers that read against a mocked SDK client). Store connectivity and readiness tests belong to
+Domain (DynamoDB only since 2026-11-17).
 
 The container readiness probe is production Java source at `src/main/java/com/lookahead/gateway/health/ContainerHealthcheck.java`, so the ordinary JaCoCo report includes it. Tests use loopback HTTP fixtures to cover healthy and failed responses, malformed bodies, redirects, unavailable endpoints, timeouts and interruption. The container probes `127.0.0.1:8080/actuator/health/readiness`, or `127.0.0.1:8081/actuator/health/readiness` when the task sets `LOOKAHEAD_RUNTIME_MODE=lower-cost-dev` (that profile moves actuator to the loopback management port), with a two-second connection limit and three-second request limit. The process-exit wrapper remains in the measured source inventory.
 
-DLV-969 (2026-11-04), plain lines since 2026-11-17: why a task stopped serving is in the application's own log stream, as plain sentences (see "Logs: plain lines" below; nothing to filter on, search for the words). A failed probe writes one plain WARN line to the application's stdout (`/proc/1/fd/1`, falling back to the probe's stderr), in the same shape as the application's lines, with the reason code in the sentence (`CONNECTION_REFUSED`, `TIMEOUT`, `NOT_READY`, `HTTP_<status>`, `UNEXPECTED_ANSWER`, `NO_ANSWER`), the failures in a row and the seconds down: `2026-11-04T20:00:00.000Z WARN  Container health check failed: CONNECTION_REFUSED (nothing is listening on 127.0.0.1:8081); probe 127.0.0.1:8081/actuator/health/readiness, 1 failed in a row, down for 0 s`. Once when it starts or changes, then at most once a minute, and once at INFO when it passes again (`Container health check passed again: READY after 120 s down and 6 failed probes (last reason NOT_READY)`); `/tmp/lookahead-healthcheck.state` remembers between probes and never changes the exit code. Inside the application: every readiness and liveness change with its reason code in the sentence (`Readiness changed to REFUSING_TRAFFIC (was ACCEPTING_TRAFFIC): MARKED_REFUSING_TRAFFIC (…)`, `Liveness changed to BROKEN …: LIVENESS_BROKEN (…)`), one `Started and ready:` summary (version, release tag, commit, profiles, deployment environment, readiness, liveness, ports, upstream host names), any health indicator that is not UP (`Health check <name> is <status> (<reason>): …`, on change and once a minute; UP again once), every refused start naming the setting or injected variable by name only (`Startup refused: <setting> … (<reason>) …`), and one `Stopping: shutdown requested …` line with uptime and the readiness before the stop. Tests: `LifecycleLogTest`, `HealthLogTest`, `PlainLogLineTest`, `StartupRefusalLogTest`, `ContainerHealthcheckTest`, `InjectedCredentialsTest`.
+DLV-969 (2026-11-04), plain lines since 2026-11-17: why a task stopped serving is in the application's own log stream, as plain sentences (see "Logs: plain lines" below; nothing to filter on, search for the words). A failed probe writes one plain WARN line to the application's stdout (`/proc/1/fd/1`, falling back to the probe's stderr), in the same shape as the application's lines, with the reason code in the sentence (`CONNECTION_REFUSED`, `TIMEOUT`, `NOT_READY`, `HTTP_<status>`, `UNEXPECTED_ANSWER`, `NO_ANSWER`), the failures in a row and the seconds down: `2026-11-04T20:00:00.000Z WARN  Container health check failed: CONNECTION_REFUSED (nothing is listening on 127.0.0.1:8081); probe 127.0.0.1:8081/actuator/health/readiness, 1 failed in a row, down for 0 s`. Once when it starts or changes, then at most once a minute, and once at INFO when it passes again (`Container health check passed again: READY after 120 s down and 6 failed probes (last reason NOT_READY)`); `/tmp/lookahead-healthcheck.state` remembers between probes and never changes the exit code. Inside the application: every readiness and liveness change with its reason code in the sentence (`Readiness changed to REFUSING_TRAFFIC (was ACCEPTING_TRAFFIC): MARKED_REFUSING_TRAFFIC (…)`, `Liveness changed to BROKEN …: LIVENESS_BROKEN (…)`), one `Started and ready:` summary (version, release tag, commit, profiles, deployment environment, readiness, liveness, ports, upstream host names), any health indicator that is not UP (`Health check <name> is <status> (<reason>): …`, on change and once a minute; UP again once), every refused start naming the setting or injected variable by name only (`Startup refused: <setting> … (<reason>) …`), and one `Stopping: shutdown requested …` line with uptime and the readiness before the stop. Tests: `LifecycleLogTest`, `HealthLogTest`, `OpsLogTest`, `OAuthClientDetailsFactoryTest`, `DevServiceOriginsTest`, `ContainerHealthcheckTest`, `InjectedCredentialInitializerTest`, `InjectedCredentialValidatorTest`.
 
 Docker resolves the checksum-pinned Gradle wrapper in a source-independent layer before copying build declarations and application sources. This reuses the wrapper download when source files change; dependency versions and the `clean test bootJar` build remain unchanged.
 
@@ -383,22 +384,22 @@ and query strings are never read for the log.
 
 The structured keys (`event.action`, `reason`, `upstream.service`, …) are still attached to every event and asserted by the
 tests (`LogCapture.pairs`), so a log pipeline could render them again, but the console pattern does not print them: every
-sentence names its own code and actor. The deploy's log scan (`deployment/dev/deploy-config.json` `logFailurePatterns`:
+sentence names its own code and actor. The deploy's log scan (`.github/pipeline/deploy/dev/deploy-config.json` `logFailurePatterns`:
 `ERROR`, `startup denied`, `AccessDeniedException`, `Unable to create tempDir`) keeps working: the level word is the first
 word after the timestamp, `AccessDeniedException` is quoted on the ERROR line of a denied AWS call, and the two fixed phrases
-are unchanged. Tests: `PlainLogLineTest` (the real pattern renders exact lines), `RequestLogTest` and `OpsLogTest` (ERROR
+are unchanged. Tests: `LifecycleLogTest` (the real pattern renders exact lines), `RequestLogTest` and `OpsLogTest` (ERROR
 sentences, masking, the request bracket and the stack trace), `ContainerHealthcheckTest` (the probe's plain line).
 
 ## SAST gate diagnostics
 
-`python3 tools/security/check.py sarif` requires completed CodeQL invocations,
+`python3 .github/pipeline/build/check.py sarif` requires completed CodeQL invocations,
 valid rule/result inventories and exercised, source-bound exceptions. A failure
 prints a reviewed constant reason (for example, missing invocation inventory or
 unexercised exception) while leaving untrusted error text and SARIF messages out
 of public logs. Warning/error notifications still block; this diagnostic change
 does not waive findings or weaken the security gate. Raw SARIF and source
 databases remain unpublished. Run the tooling regressions with
-`python3 -m unittest discover -s tools/security -p 'test_*.py'`.
+`python3 -m unittest discover -s .github/pipeline/build -p 'test_checks.py'`.
 
 SAST exception hashes are also checked in the first tooling-test step; review
 the security boundary before updating a hash after a source change. Expiry and
@@ -431,7 +432,7 @@ activation, network, IAM and cloud profile verification.
 
 The request's reauthenticate parameter can force fresh OAuth; it cannot grant
 access. Reusing a sign-in needs an authenticated server session, its stored
-client and successful Domain verification. `CloudGatewaySecurityIntegrationTest`
+client and successful Domain verification. `GatewayBffApplicationCloudIntegrationTest`
 covers missing clients, anonymous callers, rejected Domain verification and
 forced reauthentication; existing CSRF and restricted-session regressions remain
 active. Earlier October 9 PR analysis omitted the bypass finding, but main analysis
@@ -462,22 +463,21 @@ that its exception is obsolete. New authentication control flow always terminate
 fresh OAuth before reuse, and Domain compares missing credentials unconditionally
 before denying authentication. Hosted full-scan proof remains required.
 
-The dormant `release-image.yml` manual workflow reuses the full CI job, then
+The `release.yml` workflow (`01 · Full`; it replaced the earlier `release-image.yml`) reuses the full CI job, then
 exports its exact scanned image as a one-day archive. Publication loads that
 archive without rebuilding, validates source/Dockerfile/workflow/archive/config
 digests, and uses a separately reviewed DEV OIDC role. Its only source selector is
-an existing calendar release tag: a `resolve` job resolves the tag to its commit once,
+the calendar release tag its `release` job cuts at the run commit: that job resolves the tag to its commit once,
 requires that commit to be on `main`, freezes the record (`release-source` artifact),
-CI builds that commit while the workflow and `tools/release/` run from `main`, the
+CI builds that commit while the workflow and `.github/pipeline/` run from `main`, the
 frozen record is the expected source for the environment check, and the tag is
 re-checked before credentials. Rollback is a new tag at an older `main` commit; the
 scanned and registry receipts record the built commit and the executed workflow commit
-separately. It requires an immutable DEV ECR repository and a protected `dev`
-environment with independent review and protected-branch restriction. Unsupported private-repository approval
-features block this workflow; a manual trigger alone is insufficient. Registry
-receipt verifies remote manifest/config identity. No workflow was dispatched or
-image published locally. Configure approved settings and action allowlists before
-activation; private content and AWS credentials are never bundled in the image.
+separately. It requires an immutable DEV ECR repository and the `dev`
+environment restricted to `main`; the owner approves each publication in an issue
+(see `.github/pipeline/shared/README.md`). Registry
+receipt verifies remote manifest/config identity. Private content and AWS credentials
+are never bundled in the image.
 
 Publication explicitly pushes only the verified `linux/amd64` manifest (Docker API
 1.46 or newer). The registry receipt checks its config digest against the saved
@@ -489,13 +489,13 @@ The proxy allows only the exact `/bff/api/v1/platform-reviews` routes (canonical
 UUIDs) and accepts `PUT` for these routes and the delivery plan (below) only; other routes keep
 GET/POST/DELETE. Writes reject query strings. Upload bodies are relayed unparsed and bounded to 21 MiB
 (`spring.servlet.multipart.enabled=false`, so the Gateway never parses multipart); Domain
-enforces the image rules. `GatewayConfiguration.safeReturn` now accepts `/admin` paths, so
-sign-in returns to admin pages directly. Tests: `PlatformReviewGatewayTest`,
-`GatewayReturnDestinationTest`.
+enforces the image rules. `SignInReturnDestination.safeReturn` now accepts `/admin` paths, so
+sign-in returns to admin pages directly. Tests: `DomainProxyRoutesTest`, `DomainProxyControllerTest`,
+`SignInReturnDestinationTest`.
 
 ## Delivery plan relay (DLV-971)
 
-`GatewayController.deliveryRoute` forwards the delivery plan the same way as platform reviews,
+`DomainProxyRoutes.deliveryRoute` forwards the delivery plan the same way as platform reviews,
 with the session's bearer token and the session-bound CSRF token on writes; `If-Match` travels
 unchanged. The exact routes, `/bff/api/v1/...` to Domain `/api/v1/...`:
 
@@ -512,19 +512,19 @@ unchanged. The exact routes, `/bff/api/v1/...` to Domain `/api/v1/...`:
 
 DELETE on the plan or a work item, PUT on the plan itself and malformed ids are not routes
 (404 or 405, never forwarded). Sessions: a signed-in staff sign-in forwards; signed out answers
-401 as every `/bff/api/v1` route; a DEV test session (`TestSessionController.active`) is refused
+401 as every `/bff/api/v1` route; a DEV test session (`TestSessionState.active`) is refused
 for all six routes with the Previews/Architecture refusal (HTTP 401, empty body, Domain not
 asked), because test accounts are learners and never edit the plan or run its jobs. The other
 platform-review routes keep forwarding for a test session. Domain decides staff permissions. The
 routes are listed in the Domain contract (`domain-api-v1.json` in Content). Tests:
-`DeliveryRoutesTest`, `SweepsRouteTest`, `PlatformReviewGatewayTest`, `TestSessionIntegrationTest`.
+`DomainProxyRoutesTest`, `DomainProxyControllerTest`, `TestSessionControllerIntegrationTest`.
 
 ## Blaze catalog route (DLV-931)
 
-The catalog route is now `/blaze`. `GatewayConfiguration.safeReturn` accepts `/blaze` and
+The catalog route is now `/blaze`. `SignInReturnDestination.safeReturn` accepts `/blaze` and
 `/blaze/...` as sign-in return destinations and keeps `/look-ahead/...` for old bookmarks and
 open tabs; the web app owns any redirect from the old route. `/content/**` is relayed
-unchanged, so `/content/blaze/...` needs no Gateway change. Test: `GatewayReturnDestinationTest`.
+unchanged, so `/content/blaze/...` needs no Gateway change. Test: `SignInReturnDestinationTest`.
 
 ## Account theme and profile links (DLV-932)
 
@@ -536,8 +536,8 @@ Identity cookies, `Content-Type`, `Accept` and `X-CSRF-TOKEN` are forwarded;
 bodies are capped at 8 KiB; Identity 4xx responses are kept and 5xx responses
 become a sanitized 503. Other methods are rejected. Identity owns validation
 and the response shape (see the Identity README). Cloud mode (`dev`/`prod`) does
-not serve these two routes yet. Tests: `AccountProxyControllerTest`,
-`IdentityProxyServletIntegrationTest`.
+not serve these two routes yet. Tests: `AccountIdentityControllerTest`,
+`AccountIdentityProxyTest`, `IdentityProxyControllerIntegrationTest`.
 
 
 ## Staff access and cloud account preferences (DLV-930/933)
@@ -547,7 +547,7 @@ The exact `/bff/api/v1/admin/access` GET/POST, `/catalog` GET, `/lookup` POST an
 tokens; role checks remain Domain-owned. Writes require Gateway CSRF and bounded
 request bodies. Identity's internal account directory is never publicly proxied.
 In DEV/PROD, `/api/v1/account/preferences` and `/api/v1/account/links` now select
-CloudAccountController and Domain persistence, retaining Local request shapes.
+AccountCloudController and Domain persistence, retaining Local request shapes.
 Cloud services remain unprovisioned; no live AWS verification is claimed.
 
 ### Lower-cost DEV candidate
@@ -562,20 +562,21 @@ A failed remote operation is not reported as confirmed revocation.
 
 ECS injects immutable-version secret fields. Private keys must be one complete
 unencrypted PKCS8 PEM block with line-separated boundaries; incomplete envelopes,
-extra blocks and surrounding material are rejected before startup. `InjectedCredentials` validates
+extra blocks and surrounding material are rejected before startup. `InjectedCredentialInitializer` validates
 certificate validity, remaining lifetime, SAN, EKU, chain, matching PKCS8 keys,
 Gateway's exact client subject and distinct public/internal keys before context
 refresh, then installs scalar properties and inline Spring PEM bundles. Public
 provider trust and internal client identity remain separate; no TLS files or
 Secrets Manager application client are required. Injected names are
 `LOOKAHEAD_TLS_{SCHEMA,SERVER_CERTIFICATE,SERVER_KEY,CLIENT_CERTIFICATE,CLIENT_KEY,TRUST}`,
-`APP_OAUTH_CLIENT_ID`, `LOOKAHEAD_GATEWAY_CLIENT_SECRET`,
-`LOOKAHEAD_ADMISSION_CLIENT_ID`, `LOOKAHEAD_ADMISSION_CLIENT_SECRET`, and
+`APP_OAUTH_CLIENT_ID`, `LOOKAHEAD_GATEWAY_CLIENT_SECRET` and
 `LOOKAHEAD_DOMAIN_GATEWAY_SECRET`; `LOOKAHEAD_TLS_SERVER_NAME` is public configuration.
+The Gateway BFF reads no `LOOKAHEAD_ADMISSION_*` variable (since November 26, 2026 the start no longer
+asks for the admission client ID and secret).
 A validation failure reports only a fixed diagnostic and denies startup. This profile
 is DEV-only and is not a replacement for the ordinary local configuration.
 It is locally implemented, not deployed. Infra owns the candidate templates,
-finite runtime jobs and `docs/deployment/lower-cost-dev-session-runbook.md`.
+the finite runtime jobs and the DEV session runbook.
 Provider login, negative AWS reachability and complete cutover tests remain pending.
 
 ### Stable DEV upstreams (DLV-968 S3, November 1, 2026)
@@ -592,12 +593,12 @@ hostname check verifies each upstream leaf against the injected internal trust.
 `LOOKAHEAD_RELEASE_SLOT` is no longer read. Transition only: the retired
 `domain-blue|green` / `web-blue|green` names stay accepted until S5 removes the slot
 services (dated comment in `DevServiceOrigins`). The earlier blue/green slot model is
-described in Infra's `docs/deployment/lower-cost-dev-release-slots.md`.
+described in Infra's own documentation.
 
-Deployment (DLV-968 decision V, November 1, 2026): `deployment/dev/service.template.json` and
-`deployment/dev/deploy-config.json` describe one ECS service `lookahead-dev-gateway` (task definition family
-of the same name) on the stack `lookahead-dev-gateway`; `04 · Deploy DEV` (`tools/release/deploy.py`, see
-`tools/release/README.md`) renders one change set per run and ECS performs a rolling update with
+Deployment (DLV-968 decision V, November 1, 2026): `.github/pipeline/deploy/dev/service.template.json` and
+`.github/pipeline/deploy/dev/deploy-config.json` describe one ECS service `lookahead-dev-gateway` (task definition family
+of the same name) on the stack `lookahead-dev-gateway`; `04 · Deploy DEV` (`.github/pipeline/deploy/deploy.py`, see
+`.github/pipeline/shared/README.md`) renders one change set per run and ECS performs a rolling update with
 circuit-breaker rollback; `desired_count` 1 serves, 0 parks the service. The single service registers in
 the existing NLB target group `lookahead-dev-gateway-blue` (`TargetGroupArn` in the deploy configuration):
 the ingress listener stays on its blue target group, and the unused green group is removed together with
@@ -606,30 +607,30 @@ Boot needs 75-90 s on 512 CPU units; a 60 s grace killed healthy tasks on Novemb
 
 ### DEV activation preparation (DLV-914, October 30, 2026)
 
-The DEV task definition Infra generates for this application (`aws/compute/lower_cost_dev_workloads.py`,
-written to `aws/ingress/templates/dev/gateway.template.json`) runs the image with
+The DEV task definition Infra generated for this application at the time (replaced on November 1, 2026 by this
+repository's own `.github/pipeline/deploy/dev/service.template.json`) runs the image with
 `SPRING_PROFILES_ACTIVE=lower-cost-dev`, `LOOKAHEAD_ENVIRONMENT=dev`, `LOOKAHEAD_RUNTIME_MODE=lower-cost-dev`,
 `LOOKAHEAD_DOMAIN_TRANSPORT=application-mtls`, `LOOKAHEAD_RELEASE_SLOT=blue|green` and
 `LOOKAHEAD_DOMAIN_UPSTREAM=https://domain-<slot>.lookahead-dev.internal:8443` (both replaced on November 1, 2026
 by the stable upstreams above), the public hostname as
 `LOOKAHEAD_TLS_SERVER_NAME` and `LOOKAHEAD_FRONTEND_ORIGIN=https://<hostname>`, the application pool issuer,
-managed-login origin and scope prefix, the admission pool ID and managed-login origin (still set, no longer read since DLV-969), the operations table
+managed-login origin and scope prefix, the admission pool ID and managed-login origin (no longer read since DLV-969; this repository's task template stopped setting them on November 26, 2026), the operations table
 name in `LOOKAHEAD_DEV_STATE_TABLE`, `AWS_REGION`, and `JAVA_TOOL_OPTIONS` pointing at
-`/opt/lookahead/dns.security`. ECS injects the eleven credential fields listed above from immutable secret
-versions; `APP_OAUTH_CLIENT_ID` and `LOOKAHEAD_ADMISSION_CLIENT_ID` arrive as injected JSON fields, not
-plain environment values. The container listens on TLS 8443 only (plaintext on that port is refused with
+`/opt/lookahead/dns.security`. ECS injects the nine credential fields listed above from immutable secret
+versions (eleven until the two admission fields left on November 26, 2026); `APP_OAUTH_CLIENT_ID` arrives as an
+injected JSON field, not a plain environment value. The container listens on TLS 8443 only (plaintext on that port is refused with
 400), serves actuator health/info on loopback HTTP 8081, and the ECS health command runs
 `com.lookahead.gateway.health.ContainerHealthcheck`, which probes 8081 in this mode. The NLB target group
 checks TCP 8443; no HTTP health path is exposed publicly.
 
-`LowerCostDevRuntimeIntegrationTest` boots the real application with exactly these names and synthetic
+`GatewayBffApplicationLowerCostDevIntegrationTest` boots the real application with exactly these names and synthetic
 injected certificates and secrets: it proves the `spring.factories` initializer runs, TLS serves the injected
 certificate, readiness answers on the management port, every protected route (including `/actuator/info`,
 `/bff/logout/complete`) is gated by admission, `/dev/access`, `/bff/login` and the learner OAuth start pass
 the gate unadmitted and run against the learner client with PKCE and `prompt=login` (DLV-969: the gate opens
 on a Look Ahead pool sign-in; no separate admission client remains), and a
 missing injected field denies startup with the fixed diagnostic. It makes no AWS call; it is not proof of
-Cognito, DynamoDB, Service discovery, IAM or NLB behavior. `DomainIntegrationBindingsTest` pins the bindings
+Cognito, DynamoDB, Service discovery, IAM or NLB behavior. `OAuthClientDetailsFactoryTest` and `UpstreamHttpConfigurationTest` pin the bindings
 Domain's `docs/dev-activation.md` expects: the slot-specific Domain DNS name on application mTLS 8443 only
 (Domain's loopback 8081 readiness port, the other slot, plaintext and bare hostnames are refused before any
 connection), the exact application issuer, client ID and the four scopes Domain's token verifier requires,
@@ -637,8 +638,10 @@ and one shared DomainGateway secret binding.
 
 Runtime AWS calls and their IAM needs (task role `lookahead-dev-app-task`): `dynamodb:GetItem` on the
 operations table limited to partition key `dev`. The `cognito-idp:AdminGetUser` call on the tester pool left
-with DLV-969 (November 2, 2026): the DEV gate now opens on the Look Ahead pool sign-in itself, the
-`LOOKAHEAD_ADMISSION_*` task variables stay unread until phase D removes them with the pool, and an account
+with DLV-969 (November 2, 2026): the DEV gate now opens on the Look Ahead pool sign-in itself. The Gateway BFF
+no longer reads any `LOOKAHEAD_ADMISSION_*` variable: the pool ID and managed-login origin went unread with DLV-969,
+and since November 26, 2026 the start no longer reads, validates or requires the client ID and client secret and
+publishes no `app.admission.*` property; the task template no longer injects any of the four. An account
 Domain has not admitted yet lands on `/?access=pending` with the gate admission kept.
 The Gateway never writes the table and never reads Secrets Manager itself; secret delivery and image pulls
 are execution-role concerns. `/dev/session` reports `deadline`, `warning` and whether an `operation` guard
@@ -647,24 +650,22 @@ is held; it does not invent a lifecycle phase, and an unreachable table answers 
 October 30 fix: before or after admission expiry, `GET /dev/session` (and any other non-bypassed `/dev/`
 path) now answers the JSON `401 DEV_ADMISSION_REQUIRED` / `503 DEV_ADMISSION_UNAVAILABLE` contract instead
 of a login-page redirect, matching the other API prefixes; the Web shell polls it as an API. Tests:
-`DevAdmissionTest`, `ContainerHealthcheckTest`, `LowerCostDevRuntimeIntegrationTest`.
+`DevAccessFilterTest`, `ContainerHealthcheckTest`, `GatewayBffApplicationLowerCostDevIntegrationTest`.
 
-`deployment/service.yaml` remains the retained `lookahead-service/v2` candidate for Infra's older
-Service Connect planner (port 8080, `service-connect-tls`); it is not the lower-cost DEV task contract
-above and is left unchanged for that consumer. The release pipeline's optional `DEV_VERIFY_URL` cannot
-target this application in DEV: the candidate slot is reachable only inside the VPC and every public route
-requires admission, so the variable stays unset and functional proof comes from Infra's finite verifier.
-Exact resource bindings, IAM requirements and findings are recorded in the private Content handoff
-`docs/evidence/DLV-914-gateway-activation-preparation-20261030/`.
+The retained `lookahead-service/v2` service contract for Infra's older Service Connect planner and the release pipeline's
+optional `DEV_VERIFY_URL` check were removed on November 27, 2026: nothing read either. A deploy is proven by
+the verification and observation of `04 · Deploy DEV` itself (`.github/pipeline/shared/README.md`).
+Exact resource bindings, IAM requirements and findings of this preparation are recorded in the private Content handoff
+`src/delivery-plan/evidence/DLV-914-gateway-activation-preparation-20261030/`.
 
 Lower-cost DEV security events use the dedicated `lookahead.security.audit` logger
 with fixed outcome names and random event IDs. The filter preserves HTTP responses
 and emits no request paths, tokens or bodies. Infra owns the separately scoped
 audit relay and90-day archive; local tests do not verify AWS delivery.
 
-The Docker context explicitly includes only `deployment/container/dns.security`
-from that configuration directory. Keep this exact allowance when changing the
-runtime COPY; credential/private-file exclusions remain in effect.
+The Docker context explicitly includes only `.github/pipeline/build/container/dns.security`
+from the pipeline folder (`.dockerignore` names that one file, not its folders). Keep this exact
+allowance when changing the runtime COPY; credential/private-file exclusions remain in effect.
 
 
 DLV-930 invitation activation: `GET /api/v1/auth/me` does not claim staff access.
@@ -715,7 +716,7 @@ continue to block CI; renewal is never automatic.
 
 ### Calendar image releases
 
-DEV image releases use one shared `lookahead-dev-ecr` repository and `gateway-bff-vyyyy.mm.dd.hh.<00-nn>` tags. The source Git tag omits `gateway-bff-`. UTC counters start at `00` each hour independently per app. Run `python3 tools/release/release_version.py next --app gateway-bff` to suggest the next version from remote Git tags; this does not create or reserve a tag. Publish the exact source tag through the user-owned Git cycle, then supply it as `release-version` to the manual release workflow on main. CI verifies the tag/source before building and retains app/version/source/config/archive/manifest provenance. Deployment still selects an immutable digest. Prefixes organize images; IAM upload scope covers the shared repository.
+DEV image releases use one shared `lookahead-dev-ecr` repository and `gateway-bff-vyyyy.mm.dd.hh.<00-nn>` tags. The source Git tag omits `gateway-bff-`. UTC counters start at `00` each hour independently per app. Run `python3 .github/pipeline/shared/release_version.py next --app gateway-bff` to suggest the next version from remote Git tags; this does not create or reserve a tag. `01 · Full` cuts the next tag itself at its run commit (`pipeline_tag.py cut`); nobody types or pushes a tag. CI verifies the tag/source before building and retains app/version/source/config/archive/manifest provenance. Deployment still selects an immutable digest. Prefixes organize images; IAM upload scope covers the shared repository.
 Gradle builds accept `-PreleaseVersion=yyyy.mm.dd.hh.NN`; local builds retain the snapshot default.
 
 

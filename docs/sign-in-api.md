@@ -154,14 +154,14 @@ Cognito's unauthenticated client operations, so no IAM permission is involved. T
 
 **Session.** A successful sign-in verifies the ID token (issuer, audience, signature, lifetime, `token_use=id`), rotates
 the session id, saves an `OAuth2AuthenticationToken` with an `OidcUser` and an `OAuth2AuthorizedClient` (access and refresh
-token) exactly as the OAuth callback does, and finishes through `GatewaySecurityHandlers.completeSignIn`: DEV gate
+token) exactly as the OAuth callback does, and finishes through `SignInCompletionHandler.completeSignIn`: DEV gate
 freshness, Domain admission, waiting accounts (`/welcome?access=pending` in DEV, `/?access=pending` without the gate)
 and sign-in challenges. The route returns the next path instead of redirecting. Refresh uses the existing token-endpoint
 `refresh_token` grant, which Cognito accepts for refresh tokens from API sign-in.
 
 **Domain.** Tokens from API sign-in carry only `aws.cognito.signin.user.admin`. Domain accepts exactly that scope only from
 our client and only with the Gateway's proof (service secret on the internal sign-in routes, per-sign-in proof on API calls);
-see Domain `CognitoTokenVerifier`.
+see Domain `SignInTokenVerifier`.
 
 **Errors** (`code`): `INVALID_CREDENTIALS` 401, `USER_NOT_CONFIRMED` 409, `CODE_MISMATCH` 400, `CODE_EXPIRED` 400,
 `INVALID_PASSWORD` 400, `USERNAME_EXISTS` 409, `TOO_MANY_REQUESTS` 429, `STEP_EXPIRED` 400, `INVALID_REQUEST` 400,

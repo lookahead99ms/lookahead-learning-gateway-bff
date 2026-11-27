@@ -27,6 +27,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.coverage
 
 # Local runtime state, logs and generated test evidence.
 .local/
@@ -75,4 +76,4 @@ docs/account-persistence-contract.proposed.md
 
 # Generated IDE resource/class output; preserve locally, never publish.
 /bin/
-tools/release/__pycache__/
+.github/pipeline/**/__pycache__/
