@@ -1,6 +1,6 @@
 {
   "name": "06 · Restart DEV",
-  "run-name": "06 · Restart DEV | gateway-bff | #${{ github.run_number }}",
+  "run-name": "${{ github.workflow }} · gateway-bff",
   "on": {
     "workflow_dispatch": {}
   },
