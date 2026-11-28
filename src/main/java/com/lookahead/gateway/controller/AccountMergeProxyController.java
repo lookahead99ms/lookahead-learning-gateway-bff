@@ -16,36 +16,49 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * DLV-969 S36: the person's own merge of accounts that share their verified email. The Web calls these same-origin;
- * the Gateway BFF relays them to the Domain's account routes with the server-held token and sign-in proof, and passes the
- * Domain's status and body through unchanged (202, 200, 400, 404, 409, 422). Sign-in and CSRF are enforced by
- * {@code SecurityFilterChainConfiguration} ({@code /api/v1/account/**} is authenticated; every POST needs the session token).
+ * DLV-969 S36: the person's own merge of accounts that share their verified email. The Web calls
+ * these same-origin; the Gateway BFF relays them to the Domain's account routes with the
+ * server-held token and sign-in proof, and passes the Domain's status and body through unchanged
+ * (202, 200, 400, 404, 409, 422). Sign-in and CSRF are enforced by {@code
+ * SecurityFilterChainConfiguration} ({@code /api/v1/account/**} is authenticated; every POST needs
+ * the session token).
  */
 @RestController
 @Profile("gateway")
-@ConditionalOnExpression("'${app.deployment-environment:}' == 'dev' || '${app.deployment-environment:}' == 'prod'")
+@ConditionalOnExpression(
+    "'${app.deployment-environment:}' == 'dev' || '${app.deployment-environment:}' == 'prod'")
 @RequestMapping("/api/v1/account/merge")
 public class AccountMergeProxyController {
-    private final AccountMergeProxy proxy;
+  private final AccountMergeProxy proxy;
 
-    public AccountMergeProxyController(AccountMergeProxy proxy) {
-        this.proxy = proxy;
-    }
+  public AccountMergeProxyController(AccountMergeProxy proxy) {
+    this.proxy = proxy;
+  }
 
-    @PostMapping("/request")
-    public ResponseEntity<?> request(HttpServletRequest request, HttpServletResponse response, Authentication authentication) throws IOException {
-        return proxy.forward(HttpMethod.POST, "/request", request, response, authentication);
-    }
+  @PostMapping("/request")
+  public ResponseEntity<?> request(
+      HttpServletRequest request, HttpServletResponse response, Authentication authentication)
+      throws IOException {
+    return proxy.forward(HttpMethod.POST, "/request", request, response, authentication);
+  }
 
-    @GetMapping("/{token}")
-    public ResponseEntity<?> candidates(@PathVariable String token, HttpServletRequest request, HttpServletResponse response,
-            Authentication authentication) throws IOException {
-        return proxy.forwardWithToken(HttpMethod.GET, token, request, response, authentication);
-    }
+  @GetMapping("/{token}")
+  public ResponseEntity<?> candidates(
+      @PathVariable String token,
+      HttpServletRequest request,
+      HttpServletResponse response,
+      Authentication authentication)
+      throws IOException {
+    return proxy.forwardWithToken(HttpMethod.GET, token, request, response, authentication);
+  }
 
-    @PostMapping("/{token}")
-    public ResponseEntity<?> merge(@PathVariable String token, HttpServletRequest request, HttpServletResponse response,
-            Authentication authentication) throws IOException {
-        return proxy.forwardWithToken(HttpMethod.POST, token, request, response, authentication);
-    }
+  @PostMapping("/{token}")
+  public ResponseEntity<?> merge(
+      @PathVariable String token,
+      HttpServletRequest request,
+      HttpServletResponse response,
+      Authentication authentication)
+      throws IOException {
+    return proxy.forwardWithToken(HttpMethod.POST, token, request, response, authentication);
+  }
 }

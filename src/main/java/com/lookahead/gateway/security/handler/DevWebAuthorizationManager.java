@@ -13,18 +13,23 @@ import org.springframework.security.web.access.intercept.RequestAuthorizationCon
 
 /**
  * The last rule of the sign-in chain, for a request no earlier rule matched: allowed only under the
- * {@code lower-cost-dev} profile, only for GET and HEAD, and only for a path the Web fallback may serve
- * ({@link DevWebProxy#safePath}). Everywhere else, and for everything else, the answer is no.
+ * {@code lower-cost-dev} profile, only for GET and HEAD, and only for a path the Web fallback may
+ * serve ({@link DevWebProxy#safePath}). Everywhere else, and for everything else, the answer is no.
  */
-public final class DevWebAuthorizationManager implements AuthorizationManager<RequestAuthorizationContext> {
-    private final Environment environment;
+public final class DevWebAuthorizationManager
+    implements AuthorizationManager<RequestAuthorizationContext> {
+  private final Environment environment;
 
-    public DevWebAuthorizationManager(Environment environment) { this.environment = environment; }
+  public DevWebAuthorizationManager(Environment environment) {
+    this.environment = environment;
+  }
 
-    @Override public AuthorizationResult authorize(Supplier<? extends Authentication> authentication, RequestAuthorizationContext context) {
-        return new AuthorizationDecision(
-                            environment.acceptsProfiles(Profiles.of("lower-cost-dev"))
-                            && Set.of("GET", "HEAD").contains(context.getRequest().getMethod())
-                            && DevWebProxy.safePath(context.getRequest().getRequestURI()));
-    }
+  @Override
+  public AuthorizationResult authorize(
+      Supplier<? extends Authentication> authentication, RequestAuthorizationContext context) {
+    return new AuthorizationDecision(
+        environment.acceptsProfiles(Profiles.of("lower-cost-dev"))
+            && Set.of("GET", "HEAD").contains(context.getRequest().getMethod())
+            && DevWebProxy.safePath(context.getRequest().getRequestURI()));
+  }
 }

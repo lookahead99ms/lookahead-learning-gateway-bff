@@ -1,5 +1,7 @@
 package com.lookahead.gateway.security.config;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.lookahead.gateway.config.UpstreamClientConfiguration;
 import com.lookahead.gateway.config.UpstreamHttpConfiguration;
 import com.lookahead.gateway.controller.DomainProxyController;
@@ -22,57 +24,102 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import static org.assertj.core.api.Assertions.assertThat;
 
-/** DLV-914: the running Gateway BFF reports its release through /actuator/info and exposes nothing else new. */
-@SpringBootTest(classes = SecurityFilterChainConfigurationActuatorInfoIntegrationTest.Application.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"spring.config.name=actuator-info-release-test", "server.address=127.0.0.1", "app.deployment-environment=local",
-                "app.oauth.issuer=http://127.0.0.1:4331", "app.oauth.frontend=http://127.0.0.1:4331",
-                "app.oauth.client-secret=synthetic-long-client-secret-for-testing", "app.oauth.client-id=lookahead-test-gateway",
-                "app.oauth.identity-upstream=http://identity:8080", "app.oauth.domain-api-upstream=http://domain-api:8080",
-                // Same exposure as application.yml (asserted below); the real file needs deployment secrets.
-                "management.endpoints.web.exposure.include=health,info"})
+/**
+ * DLV-914: the running Gateway BFF reports its release through /actuator/info and exposes nothing
+ * else new.
+ */
+@SpringBootTest(
+    classes = SecurityFilterChainConfigurationActuatorInfoIntegrationTest.Application.class,
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = {
+      "spring.config.name=actuator-info-release-test",
+      "server.address=127.0.0.1",
+      "app.deployment-environment=local",
+      "app.oauth.issuer=http://127.0.0.1:4331",
+      "app.oauth.frontend=http://127.0.0.1:4331",
+      "app.oauth.client-secret=synthetic-long-client-secret-for-testing",
+      "app.oauth.client-id=lookahead-test-gateway",
+      "app.oauth.identity-upstream=http://identity:8080",
+      "app.oauth.domain-api-upstream=http://domain-api:8080",
+      // Same exposure as application.yml (asserted below); the real file needs deployment secrets.
+      "management.endpoints.web.exposure.include=health,info"
+    })
 @ActiveProfiles("gateway")
 class SecurityFilterChainConfigurationActuatorInfoIntegrationTest {
-    @Configuration
-    @EnableAutoConfiguration(excludeName = {"org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"})
-    @Import({ActiveSignInTestConfiguration.class, SecurityFilterChainConfiguration.class, OAuthClientConfiguration.class, UpstreamHttpConfiguration.class, UpstreamClientConfiguration.class,
-            OAuthConfiguration.class, SignInHandlerConfiguration.class, SignInFilterConfiguration.class, SignInController.class, DomainProxyController.class})
-    static class Application { }
+  @Configuration
+  @EnableAutoConfiguration(
+      excludeName = {"org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"})
+  @Import({
+    ActiveSignInTestConfiguration.class,
+    SecurityFilterChainConfiguration.class,
+    OAuthClientConfiguration.class,
+    UpstreamHttpConfiguration.class,
+    UpstreamClientConfiguration.class,
+    OAuthConfiguration.class,
+    SignInHandlerConfiguration.class,
+    SignInFilterConfiguration.class,
+    SignInController.class,
+    DomainProxyController.class
+  })
+  static class Application {}
 
-    @LocalServerPort int port;
-    private final HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+  @LocalServerPort int port;
+  private final HttpClient client =
+      HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
 
-    private HttpResponse<String> send(String method, String path) throws Exception {
-        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path)).method(method, HttpRequest.BodyPublishers.noBody()).build();
-        return client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    }
+  private HttpResponse<String> send(String method, String path) throws Exception {
+    var request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+            .method(method, HttpRequest.BodyPublishers.noBody())
+            .build();
+    return client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+  }
 
-    @Test void infoReportsBuildVersionReleaseTagAndSourceRevisionWithoutAuthentication() throws Exception {
-        var response = send("GET", "/actuator/info");
-        assertThat(response.statusCode()).isEqualTo(200);
-        JsonNode build = new ObjectMapper().readTree(response.body()).path("build");
-        // Gradle receives -PreleaseVersion (calendar version in a release build, 0.0.1-SNAPSHOT otherwise) plus tag and commit.
-        assertThat(build.path("version").asString()).matches("\\d{4}\\.\\d{2}\\.\\d{2}\\.\\d{2}\\.\\d+|0\\.0\\.1-SNAPSHOT");
-        assertThat(build.path("name").asString()).isEqualTo("lookahead-learning-gateway-bff");
-        assertThat(build.path("releaseTag").asString()).matches("v\\d{4}\\.\\d{2}\\.\\d{2}\\.\\d{2}\\.\\d+|dev");
-        assertThat(build.path("sourceRevision").asString()).matches("[a-f0-9]{40}|local");
-        if (!"dev".equals(build.path("releaseTag").asString()))
-            assertThat(build.path("releaseTag").asString()).isEqualTo("v" + build.path("version").asString());
-        assertThat(response.body()).doesNotContain("secret").doesNotContain("password");
-    }
+  @Test
+  void infoReportsBuildVersionReleaseTagAndSourceRevisionWithoutAuthentication() throws Exception {
+    var response = send("GET", "/actuator/info");
+    assertThat(response.statusCode()).isEqualTo(200);
+    JsonNode build = new ObjectMapper().readTree(response.body()).path("build");
+    // Gradle receives -PreleaseVersion (calendar version in a release build, 0.0.1-SNAPSHOT
+    // otherwise) plus tag and commit.
+    assertThat(build.path("version").asString())
+        .matches("\\d{4}\\.\\d{2}\\.\\d{2}\\.\\d{2}\\.\\d+|0\\.0\\.1-SNAPSHOT");
+    assertThat(build.path("name").asString()).isEqualTo("lookahead-learning-gateway-bff");
+    assertThat(build.path("releaseTag").asString())
+        .matches("v\\d{4}\\.\\d{2}\\.\\d{2}\\.\\d{2}\\.\\d+|dev");
+    assertThat(build.path("sourceRevision").asString()).matches("[a-f0-9]{40}|local");
+    if (!"dev".equals(build.path("releaseTag").asString()))
+      assertThat(build.path("releaseTag").asString())
+          .isEqualTo("v" + build.path("version").asString());
+    assertThat(response.body()).doesNotContain("secret").doesNotContain("password");
+  }
 
-    @Test void noOtherActuatorEndpointBecamePublic() throws Exception {
-        for (String path : List.of("/actuator", "/actuator/env", "/actuator/beans", "/actuator/mappings", "/actuator/loggers",
-                "/actuator/configprops", "/actuator/metrics", "/actuator/threaddump", "/actuator/heapdump", "/actuator/conditions"))
-            assertThat(send("GET", path).statusCode()).as(path).isIn(401, 403, 404);
-        assertThat(send("POST", "/actuator/info").statusCode()).isNotEqualTo(200);
-        assertThat(send("GET", "/actuator/health").statusCode()).isEqualTo(200);
-    }
+  @Test
+  void noOtherActuatorEndpointBecamePublic() throws Exception {
+    for (String path :
+        List.of(
+            "/actuator",
+            "/actuator/env",
+            "/actuator/beans",
+            "/actuator/mappings",
+            "/actuator/loggers",
+            "/actuator/configprops",
+            "/actuator/metrics",
+            "/actuator/threaddump",
+            "/actuator/heapdump",
+            "/actuator/conditions"))
+      assertThat(send("GET", path).statusCode()).as(path).isIn(401, 403, 404);
+    assertThat(send("POST", "/actuator/info").statusCode()).isNotEqualTo(200);
+    assertThat(send("GET", "/actuator/health").statusCode()).isEqualTo(200);
+  }
 
-    @Test void applicationConfigurationExposesOnlyHealthAndInfo() throws IOException {
-        String yaml = Files.readString(Path.of("src/main/resources/application.yml"));
-        assertThat(yaml).contains("management:\n  endpoints:\n    web:\n      exposure:\n        include: health,info\n");
-        assertThat(yaml.split("exposure:").length - 1).isEqualTo(1);
-    }
+  @Test
+  void applicationConfigurationExposesOnlyHealthAndInfo() throws IOException {
+    String yaml = Files.readString(Path.of("src/main/resources/application.yml"));
+    assertThat(yaml)
+        .contains(
+            "management:\n  endpoints:\n    web:\n      exposure:\n        include: health,info\n");
+    assertThat(yaml.split("exposure:").length - 1).isEqualTo(1);
+  }
 }

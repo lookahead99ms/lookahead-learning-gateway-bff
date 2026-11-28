@@ -1,5 +1,18 @@
 package com.lookahead.gateway.controller;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oauth2Login;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.lookahead.gateway.config.UpstreamClientConfiguration;
 import com.lookahead.gateway.config.UpstreamHttpConfiguration;
 import com.lookahead.gateway.log.OpsLogTest;
@@ -15,358 +28,744 @@ import com.lookahead.gateway.security.oauth.OAuthClientDetails;
 import com.lookahead.gateway.security.session.DevAccessSession;
 import com.lookahead.gateway.security.session.SignInSession;
 import com.lookahead.gateway.security.session.TestSessionState;
+import java.io.IOException;
 import java.time.Instant;
+import java.util.List;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.*;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.*;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.match.MockRestRequestMatchers;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.json.JsonMapper;
-import static org.assertj.core.api.Assertions.*;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oauth2Login;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import org.springframework.test.web.client.match.MockRestRequestMatchers;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
-import java.io.IOException;
-import java.util.List;
-import org.hamcrest.Matchers;
-import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
-import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
-import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
-import org.springframework.security.oauth2.core.OAuth2AccessToken;
-import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
-import org.springframework.test.web.client.ExpectedCount;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
- * DLV-969 S35: staff use a DEV test account inside the open gate. Real cloud Spring security and controllers; the
- * Domain is a controlled server. The gate admission is put in the session as DevAccessSession would after a sign-in.
+ * DLV-969 S35: staff use a DEV test account inside the open gate. Real cloud Spring security and
+ * controllers; the Domain is a controlled server. The gate admission is put in the session as
+ * DevAccessSession would after a sign-in.
  */
-@SpringBootTest(classes=TestSessionControllerIntegrationTest.Application.class, properties={
-    "spring.config.name=cloud-security-test", "app.deployment-environment=dev",
-    "app.oauth.frontend=https://learn.example.test", "app.oauth.domain-api-upstream=https://domain.example.test",
-    "app.oauth.client-id=syntheticclient12345", "app.oauth.client-secret=synthetic-client-secret-never-used-outside-fixtures",
-    "app.cognito.issuer=https://cognito-idp.us-east-2.amazonaws.com/us-east-2_Example",
-    "app.cognito.managed-login=https://example.auth.us-east-2.amazoncognito.com",
-    "app.cognito.scope-prefix=lookahead", "app.cognito.gateway-secret=synthetic-internal-secret-never-used-outside-fixtures"})
+@SpringBootTest(
+    classes = TestSessionControllerIntegrationTest.Application.class,
+    properties = {
+      "spring.config.name=cloud-security-test",
+      "app.deployment-environment=dev",
+      "app.oauth.frontend=https://learn.example.test",
+      "app.oauth.domain-api-upstream=https://domain.example.test",
+      "app.oauth.client-id=syntheticclient12345",
+      "app.oauth.client-secret=synthetic-client-secret-never-used-outside-fixtures",
+      "app.cognito.issuer=https://cognito-idp.us-east-2.amazonaws.com/us-east-2_Example",
+      "app.cognito.managed-login=https://example.auth.us-east-2.amazoncognito.com",
+      "app.cognito.scope-prefix=lookahead",
+      "app.cognito.gateway-secret=synthetic-internal-secret-never-used-outside-fixtures"
+    })
 @ActiveProfiles("gateway")
 class TestSessionControllerIntegrationTest {
-    static final String LEARNER = "2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a";
-    @Configuration @EnableAutoConfiguration
-    @Import({SecurityFilterChainConfiguration.class,OAuthClientConfiguration.class,UpstreamHttpConfiguration.class,UpstreamClientConfiguration.class,OAuthConfiguration.class,
-        SignInHandlerConfiguration.class, SignInFilterConfiguration.class, SignInController.class, DomainProxyController.class,AccountCloudController.class,SignInOptionsController.class,PasswordSignInController.class,PasswordSignInConfiguration.class,IdentityProxyController.class,
-        AccountIdentityController.class,UpstreamErrorHandler.class,TestSessionController.class,ControlledHttp.class})
-    static class Application {}
-    @Configuration static class ControlledHttp {
-        MockRestServiceServer server;
-        @Bean @Primary RestClient controlledHttp(){var builder=RestClient.builder();server=MockRestServiceServer.bindTo(builder).build();return builder.build();}
-    }
-    @Autowired WebApplicationContext context;
-    @Autowired ControlledHttp fixture;
-    @Autowired OAuthClientDetails oauth;
-    @Autowired ClientRegistrationRepository registrations;
-    @Autowired OAuth2AuthorizedClientRepository authorizedClients;
-    MockMvc mvc;
-    @BeforeEach void reset(){fixture.server.reset();mvc=MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).addFilters(new SignOutLog()).build();SecurityContextHolder.clearContext();
-        events.start();((Logger)LoggerFactory.getLogger("lookahead.event")).addAppender(events);}
-    @AfterEach void detach(){((Logger)LoggerFactory.getLogger("lookahead.event")).detachAppender(events);events.stop();
-        // DLV-969: no test-session line names the gate holder or carries their sub; test account ids (UUIDs) only.
-        assertThat(events.list).allSatisfy(line->assertThat(line.getFormattedMessage()+OpsLogTest.pairs(line)).doesNotContain("admin@example.test","sub-admin",oauth.domainSecret()));}
-    /** The lookahead.event lines each test writes. */
-    final ListAppender<ILoggingEvent> events=new ListAppender<>();
-    List<String> said(){return events.list.stream().map(ILoggingEvent::getFormattedMessage).toList();}
+  static final String LEARNER = "2c7e9a4d-1b3f-4c5e-8d9a-0b1c2d3e4f5a";
 
-    /** A browser whose DEV gate an admin opened, now signed out of the platform. */
-    MockHttpSession gate(){
-        var session=new MockHttpSession(context.getServletContext());
-        session.setAttribute(DevAccessSession.ATTRIBUTE,new DevAccessSession.State("admin@example.test","sub-admin",Instant.now()));
-        return session;
-    }
-    String csrf(MockHttpSession session)throws Exception{
-        return new JsonMapper().readTree(mvc.perform(get("/api/v1/auth/csrf").session(session)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data").path("token").asString();
-    }
-    void domain(String path,HttpMethod method,String answer,HttpStatus status){
-        fixture.server.expect(requestTo(oauth.domainApiUpstream()+path)).andExpect(method(method))
-            .andExpect(MockRestRequestMatchers.header(TestSessionState.SECRET_HEADER,oauth.domainSecret())).andExpect(MockRestRequestMatchers.header(TestSessionState.HOLDER_HEADER,"sub-admin"))
-            .andExpect(headerDoesNotExist("Authorization"))
-            .andRespond(withStatus(status).contentType(MediaType.APPLICATION_JSON).body(answer));
-    }
-    /** SignInCheckFilter asks the Domain about a signed-in person on every BFF call. */
-    void signedInCheck(){
-        fixture.server.expect(ExpectedCount.manyTimes(),requestTo(oauth.domainApiUpstream()+"/api/v1/auth/me"))
-            .andExpect(MockRestRequestMatchers.header("Authorization",Matchers.startsWith("Bearer "))).andRespond(withSuccess("{\"data\":{}}",MediaType.APPLICATION_JSON));
-    }
-    MockHttpSession started(MockHttpSession session)throws Exception{
-        domain("/internal/v1/test-sessions/start",HttpMethod.POST,"{\"data\":{\"accountId\":\""+LEARNER+"\"}}",HttpStatus.OK);
-        String before=session.getId();
-        mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",csrf(session))
-                .contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
-            .andExpect(status().isOk()).andExpect(jsonPath("data.next").value("/"));
-        fixture.server.verify();fixture.server.reset();
-        assertThat(session.getId()).isNotEqualTo(before);
-        var signedIn=((SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
-        assertThat(TestSessionState.active(signedIn)).isTrue();assertThat(signedIn.getPrincipal()).isEqualTo(LEARNER);
-        assertThat(session.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
-        // DLV-971: the activity stamp is set at the start, so the idle filter does not end a session started while signed out.
-        assertThat(session.getAttribute(SignInSession.LAST_ACTIVITY)).isInstanceOf(Instant.class);
-        return session;
-    }
+  @Configuration
+  @EnableAutoConfiguration
+  @Import({
+    SecurityFilterChainConfiguration.class,
+    OAuthClientConfiguration.class,
+    UpstreamHttpConfiguration.class,
+    UpstreamClientConfiguration.class,
+    OAuthConfiguration.class,
+    SignInHandlerConfiguration.class,
+    SignInFilterConfiguration.class,
+    SignInController.class,
+    DomainProxyController.class,
+    AccountCloudController.class,
+    SignInOptionsController.class,
+    PasswordSignInController.class,
+    PasswordSignInConfiguration.class,
+    IdentityProxyController.class,
+    AccountIdentityController.class,
+    UpstreamErrorHandler.class,
+    TestSessionController.class,
+    ControlledHttp.class
+  })
+  static class Application {}
 
-    @Test void aSignedOutGateHolderSeesTheTestAccountsTheDomainAllows()throws Exception {
-        var session=gate();
-        domain("/internal/v1/test-sessions/accounts",HttpMethod.GET,"{\"data\":[{\"accountId\":\""+LEARNER+"\",\"username\":\"learner07@lookahead.dev\"}]}",HttpStatus.OK);
-        mvc.perform(get("/bff/api/v1/auth/test-accounts").session(session)).andExpect(status().isOk())
-            .andExpect(jsonPath("data[0].username").value("learner07@lookahead.dev")).andExpect(header().string("Cache-Control","no-store"));
-        fixture.server.verify();
-        // No open gate in this session: nothing to choose, and the Domain is not asked.
-        fixture.server.reset();
-        mvc.perform(get("/bff/api/v1/auth/test-accounts").session(new MockHttpSession(context.getServletContext()))).andExpect(status().isOk()).andExpect(jsonPath("data").isEmpty());
-        fixture.server.verify();
-        // DLV-969 (2026-11-04): signed in as yourself, the account menu's Switch to a test account gets the same list.
-        fixture.server.reset();signedInCheck();
-        domain("/internal/v1/test-sessions/accounts",HttpMethod.GET,"{\"data\":[{\"accountId\":\""+LEARNER+"\"}]}",HttpStatus.OK);
-        mvc.perform(get("/bff/api/v1/auth/test-accounts").session(gate()).with(oauth2Login().clientRegistration(registrations.findByRegistrationId("lookahead"))))
-            .andExpect(status().isOk()).andExpect(jsonPath("data[0].accountId").value(LEARNER));
-    }
+  @Configuration
+  static class ControlledHttp {
+    MockRestServiceServer server;
 
-    @Test void aTestSessionCallsTheDomainAsTheTestAccountAndSignOutKeepsTheGate()throws Exception {
-        var session=started(gate());
-        fixture.server.expect(requestTo(oauth.domainApiUpstream()+"/api/v1/auth/me"))
-            .andExpect(MockRestRequestMatchers.header(TestSessionState.SECRET_HEADER,oauth.domainSecret())).andExpect(MockRestRequestMatchers.header(TestSessionState.HOLDER_HEADER,"sub-admin"))
-            .andExpect(MockRestRequestMatchers.header(TestSessionState.ACCOUNT_HEADER,LEARNER)).andExpect(headerDoesNotExist("Authorization"))
-            .andRespond(withSuccess("{\"data\":{\"accountId\":\""+LEARNER+"\"}}",MediaType.APPLICATION_JSON));
-        // Routes that need a signed-in person accept the test session too.
-        fixture.server.expect(requestTo(oauth.domainApiUpstream()+"/api/v1/admin/accounts")).andExpect(MockRestRequestMatchers.header(TestSessionState.ACCOUNT_HEADER,LEARNER))
-            .andExpect(headerDoesNotExist("Authorization")).andRespond(withSuccess("{\"data\":[]}",MediaType.APPLICATION_JSON));
-        mvc.perform(get("/bff/api/v1/auth/me").session(session)).andExpect(status().isOk()).andExpect(jsonPath("data.accountId").value(LEARNER));
-        mvc.perform(get("/bff/api/v1/admin/accounts").session(session)).andExpect(status().isOk());
-        fixture.server.verify();
-        // A test account has no sign-in, profile or password of its own.
-        mvc.perform(get("/api/v1/account/sign-ins").session(session)).andExpect(status().isConflict()).andExpect(jsonPath("code").value("TEST_SESSION"));
-        // Sign out: no provider involved, back to /sign-in, the gate admission carried into the fresh session.
-        var out=mvc.perform(post("/bff/api/v1/auth/logout").session(session).header("X-CSRF-TOKEN",csrf(session)))
-            .andExpect(status().isOk()).andExpect(jsonPath("data.logoutUrl").value("https://learn.example.test/sign-in")).andReturn();
-        var fresh=(MockHttpSession)out.getRequest().getSession(false);
-        assertThat(said()).contains("Test session started while signed out: now using test account "+LEARNER,"Signed out of test account "+LEARNER+" (kind test-session); the DEV gate stays open");
-        assertThat(fresh).isNotNull();assertThat(fresh.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
-        assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
-        mvc.perform(get("/bff/api/v1/auth/me").session(fresh)).andExpect(status().isUnauthorized());
+    @Bean
+    @Primary
+    RestClient controlledHttp() {
+      var builder = RestClient.builder();
+      server = MockRestServiceServer.bindTo(builder).build();
+      return builder.build();
     }
+  }
 
-    @Test void aTestSessionWhoseGateIsGoneSendsNothingToTheDomain()throws Exception {
-        var session=started(gate());
-        session.removeAttribute(DevAccessSession.ATTRIBUTE);
-        mvc.perform(get("/bff/api/v1/auth/me").session(session)).andExpect(status().isUnauthorized());
-        fixture.server.verify();
-    }
+  @Autowired WebApplicationContext context;
+  @Autowired ControlledHttp fixture;
+  @Autowired OAuthClientDetails oauth;
+  @Autowired ClientRegistrationRepository registrations;
+  @Autowired OAuth2AuthorizedClientRepository authorizedClients;
+  MockMvc mvc;
 
-    @Test void startIsRefusedWithoutTheGateForABadIdOrWhenTheDomainSaysNo()throws Exception {
-        var noGate=new MockHttpSession(context.getServletContext());
-        mvc.perform(post("/bff/api/v1/auth/test-session").session(noGate).header("X-CSRF-TOKEN",csrf(noGate)).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
-            .andExpect(status().isUnauthorized()).andExpect(jsonPath("code").value("DEV_ADMISSION_REQUIRED"));
-        var session=gate();String token=csrf(session);
-        for(String body:new String[]{"{\"accountId\":\"not-a-uuid\"}","{}"})
-            mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isUnprocessableEntity());
-        // Without the CSRF token nothing starts.
-        mvc.perform(post("/bff/api/v1/auth/test-session").session(session).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
-            .andExpect(status().isForbidden());
-        domain("/internal/v1/test-sessions/start",HttpMethod.POST,"{\"code\":\"TEST_SESSION_FORBIDDEN\",\"message\":\"Your role cannot use this test account.\"}",HttpStatus.FORBIDDEN);
-        mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
-            .andExpect(status().isForbidden()).andExpect(jsonPath("code").value("TEST_SESSION_FORBIDDEN"));
-        assertThat(said()).contains("Test session request refused: DEV_ADMISSION_REQUIRED (the DEV gate is not open in this session, HTTP 401)",
-            "Test session request refused: TEST_ACCOUNT_REQUIRED (no valid test account id was sent, HTTP 422)",
-            "Test session request refused: TEST_SESSION_FORBIDDEN (Domain refused the switch, HTTP 403)");
-        assertThat(session.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
-        fixture.server.verify();fixture.server.reset();
-        domain("/internal/v1/test-sessions/start",HttpMethod.POST,"{}",HttpStatus.INTERNAL_SERVER_ERROR);
-        mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
-            .andExpect(status().isServiceUnavailable());
-        fixture.server.verify();
-        fixture.server.reset();fixture.server.expect(requestTo(oauth.domainApiUpstream()+"/internal/v1/test-sessions/start")).andRespond(withException(new IOException("down")));
-        mvc.perform(post("/bff/api/v1/auth/test-session").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+LEARNER+"\"}"))
-            .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("code").value("SERVICE_UNAVAILABLE"));
-        assertThat(said()).contains("Test session request refused: HTTP_503 (the test-session service was unavailable, HTTP 503)",
-            "Test session request could not reach Domain: DOMAIN_UNAVAILABLE (ResourceAccessException < IOException); answered 503");
-    }
+  @BeforeEach
+  void reset() {
+    fixture.server.reset();
+    mvc =
+        MockMvcBuilders.webAppContextSetup(context)
+            .apply(springSecurity())
+            .addFilters(new SignOutLog())
+            .build();
+    SecurityContextHolder.clearContext();
+    events.start();
+    ((Logger) LoggerFactory.getLogger("lookahead.event")).addAppender(events);
+  }
 
-    static final String SECOND = "7d1c0b9a-2e3f-4a5b-9c8d-1e2f3a4b5c6d";
+  @AfterEach
+  void detach() {
+    ((Logger) LoggerFactory.getLogger("lookahead.event")).detachAppender(events);
+    events.stop();
+    // DLV-969: no test-session line names the gate holder or carries their sub; test account ids
+    // (UUIDs) only.
+    assertThat(events.list)
+        .allSatisfy(line ->
+            assertThat(line.getFormattedMessage() + OpsLogTest.pairs(line))
+                .doesNotContain("admin@example.test", "sub-admin", oauth.domainSecret()));
+  }
 
-    /** Switches this session to {@code account}, signed in as yourself ({@code staff}) or already in a test session. */
-    void switchTo(MockHttpSession session,String account,boolean staff)throws Exception {
-        domain("/internal/v1/test-sessions/start",HttpMethod.POST,"{\"data\":{\"accountId\":\""+account+"\"}}",HttpStatus.OK);
-        var request=post("/bff/api/v1/auth/test-session").session(session).contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\""+account+"\"}");
-        if(staff)request.with(oauth2Login().clientRegistration(registrations.findByRegistrationId("lookahead"))).with(SecurityMockMvcRequestPostProcessors.csrf());
-        else request.header("X-CSRF-TOKEN",csrf(session));
-        mvc.perform(request).andExpect(status().isOk()).andExpect(jsonPath("data.next").value("/"));
-        fixture.server.verify();fixture.server.reset();
-    }
-    /** The staff sign-in's tokens in the session, as the real sign-in stores them (the test login keeps them for one request). */
-    void keepTokens(MockHttpSession session){
-        var staff=(OAuth2AuthenticationToken)session.getAttribute(TestSessionState.STAFF_SIGN_IN);
-        var request=new MockHttpServletRequest();request.setSession(session);
-        var token=new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,
-            "synthetic-access-token",Instant.now(),Instant.now().plusSeconds(600));
-        authorizedClients.saveAuthorizedClient(new OAuth2AuthorizedClient(registrations.findByRegistrationId("lookahead"),staff.getName(),token),
-            staff,request,new MockHttpServletResponse());
-    }
-    Authentication signedIn(MockHttpSession session){
-        return ((SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
-    }
+  /** The lookahead.event lines each test writes. */
+  final ListAppender<ILoggingEvent> events = new ListAppender<>();
 
-    /** DLV-969 (owner, 2026-11-04): Switch to a test account from the account menu, switch again, then Back to my account. */
-    @Test void staffSwitchFromTheirOwnSignInAndComeBackWithoutSigningIn()throws Exception {
-        var session=gate();signedInCheck();
-        String before=session.getId();
-        switchTo(session,LEARNER,true);
-        keepTokens(session);
-        assertThat(session.getId()).isNotEqualTo(before);
-        assertThat(TestSessionState.active(signedIn(session))).isTrue();
-        var staff=session.getAttribute(TestSessionState.STAFF_SIGN_IN);
-        assertThat(staff).isInstanceOf(OAuth2AuthenticationToken.class);
-        assertThat(session.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
-        mvc.perform(get("/bff/api/v1/auth/test-session").session(session)).andExpect(status().isOk())
-            .andExpect(jsonPath("data.active").value(true)).andExpect(jsonPath("data.canReturn").value(true)).andExpect(header().string("Cache-Control","no-store"));
-        // Switching between test accounts keeps the same staff sign-in aside.
-        switchTo(session,SECOND,false);
-        assertThat(signedIn(session).getPrincipal()).isEqualTo(SECOND);
-        assertThat(session.getAttribute(TestSessionState.STAFF_SIGN_IN)).isSameAs(staff);
-        // Back to my account: your own sign-in again, with a new session id, and nothing kept aside.
-        String during=session.getId();signedInCheck();
-        mvc.perform(post("/bff/api/v1/auth/test-session/end").session(session).header("X-CSRF-TOKEN",csrf(session)))
-            .andExpect(status().isOk()).andExpect(jsonPath("data.next").value("/"));
-        assertThat(session.getId()).isNotEqualTo(during);
-        assertThat(signedIn(session)).isSameAs(staff);
-        assertThat(session.getAttribute(TestSessionState.STAFF_SIGN_IN)).isNull();
-        assertThat(session.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
-        mvc.perform(get("/bff/api/v1/auth/test-session").session(session)).andExpect(status().isOk())
-            .andExpect(jsonPath("data.active").value(false)).andExpect(jsonPath("data.canReturn").value(false));
-        // Not in a test session: nothing to end.
-        mvc.perform(post("/bff/api/v1/auth/test-session/end").session(session).header("X-CSRF-TOKEN",csrf(session)))
-            .andExpect(status().isConflict()).andExpect(jsonPath("code").value("NO_TEST_SESSION"));
-        // DLV-969 (owner, 2026-11-04): the switch, the switch between test accounts, Back to my account and the refusal, each logged.
-        assertThat(said()).contains("Test session started from the staff sign-in: now using test account "+LEARNER+" (the staff sign-in is kept for Back to my account)",
-            "Test session switched from test account "+LEARNER+" to test account "+SECOND,
-            "Back to my account: left test account "+SECOND+" and restored the staff sign-in",
+  List<String> said() {
+    return events.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+  }
+
+  /** A browser whose DEV gate an admin opened, now signed out of the platform. */
+  MockHttpSession gate() {
+    var session = new MockHttpSession(context.getServletContext());
+    session.setAttribute(
+        DevAccessSession.ATTRIBUTE,
+        new DevAccessSession.State("admin@example.test", "sub-admin", Instant.now()));
+    return session;
+  }
+
+  String csrf(MockHttpSession session) throws Exception {
+    return new JsonMapper()
+        .readTree(
+            mvc.perform(get("/api/v1/auth/csrf").session(session))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString())
+        .path("data")
+        .path("token")
+        .asString();
+  }
+
+  void domain(String path, HttpMethod method, String answer, HttpStatus status) {
+    fixture
+        .server
+        .expect(requestTo(oauth.domainApiUpstream() + path))
+        .andExpect(method(method))
+        .andExpect(
+            MockRestRequestMatchers.header(TestSessionState.SECRET_HEADER, oauth.domainSecret()))
+        .andExpect(MockRestRequestMatchers.header(TestSessionState.HOLDER_HEADER, "sub-admin"))
+        .andExpect(headerDoesNotExist("Authorization"))
+        .andRespond(withStatus(status).contentType(MediaType.APPLICATION_JSON).body(answer));
+  }
+
+  /** SignInCheckFilter asks the Domain about a signed-in person on every BFF call. */
+  void signedInCheck() {
+    fixture
+        .server
+        .expect(ExpectedCount.manyTimes(), requestTo(oauth.domainApiUpstream() + "/api/v1/auth/me"))
+        .andExpect(MockRestRequestMatchers.header("Authorization", Matchers.startsWith("Bearer ")))
+        .andRespond(withSuccess("{\"data\":{}}", MediaType.APPLICATION_JSON));
+  }
+
+  MockHttpSession started(MockHttpSession session) throws Exception {
+    domain(
+        "/internal/v1/test-sessions/start",
+        HttpMethod.POST,
+        "{\"data\":{\"accountId\":\"" + LEARNER + "\"}}",
+        HttpStatus.OK);
+    String before = session.getId();
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accountId\":\"" + LEARNER + "\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.next").value("/"));
+    fixture.server.verify();
+    fixture.server.reset();
+    assertThat(session.getId()).isNotEqualTo(before);
+    var signedIn =
+        ((SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+    assertThat(TestSessionState.active(signedIn)).isTrue();
+    assertThat(signedIn.getPrincipal()).isEqualTo(LEARNER);
+    assertThat(session.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
+    // DLV-971: the activity stamp is set at the start, so the idle filter does not end a session
+    // started while signed out.
+    assertThat(session.getAttribute(SignInSession.LAST_ACTIVITY)).isInstanceOf(Instant.class);
+    return session;
+  }
+
+  @Test
+  void aSignedOutGateHolderSeesTheTestAccountsTheDomainAllows() throws Exception {
+    var session = gate();
+    domain(
+        "/internal/v1/test-sessions/accounts",
+        HttpMethod.GET,
+        "{\"data\":[{\"accountId\":\"" + LEARNER + "\",\"username\":\"learner07@lookahead.dev\"}]}",
+        HttpStatus.OK);
+    mvc.perform(get("/bff/api/v1/auth/test-accounts").session(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data[0].username").value("learner07@lookahead.dev"))
+        .andExpect(header().string("Cache-Control", "no-store"));
+    fixture.server.verify();
+    // No open gate in this session: nothing to choose, and the Domain is not asked.
+    fixture.server.reset();
+    mvc.perform(
+            get("/bff/api/v1/auth/test-accounts")
+                .session(new MockHttpSession(context.getServletContext())))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data").isEmpty());
+    fixture.server.verify();
+    // DLV-969 (2026-11-04): signed in as yourself, the account menu's Switch to a test account gets
+    // the same list.
+    fixture.server.reset();
+    signedInCheck();
+    domain(
+        "/internal/v1/test-sessions/accounts",
+        HttpMethod.GET,
+        "{\"data\":[{\"accountId\":\"" + LEARNER + "\"}]}",
+        HttpStatus.OK);
+    mvc.perform(
+            get("/bff/api/v1/auth/test-accounts")
+                .session(gate())
+                .with(
+                    oauth2Login()
+                        .clientRegistration(registrations.findByRegistrationId("lookahead"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data[0].accountId").value(LEARNER));
+  }
+
+  @Test
+  void aTestSessionCallsTheDomainAsTheTestAccountAndSignOutKeepsTheGate() throws Exception {
+    var session = started(gate());
+    fixture
+        .server
+        .expect(requestTo(oauth.domainApiUpstream() + "/api/v1/auth/me"))
+        .andExpect(
+            MockRestRequestMatchers.header(TestSessionState.SECRET_HEADER, oauth.domainSecret()))
+        .andExpect(MockRestRequestMatchers.header(TestSessionState.HOLDER_HEADER, "sub-admin"))
+        .andExpect(MockRestRequestMatchers.header(TestSessionState.ACCOUNT_HEADER, LEARNER))
+        .andExpect(headerDoesNotExist("Authorization"))
+        .andRespond(
+            withSuccess(
+                "{\"data\":{\"accountId\":\"" + LEARNER + "\"}}", MediaType.APPLICATION_JSON));
+    // Routes that need a signed-in person accept the test session too.
+    fixture
+        .server
+        .expect(requestTo(oauth.domainApiUpstream() + "/api/v1/admin/accounts"))
+        .andExpect(MockRestRequestMatchers.header(TestSessionState.ACCOUNT_HEADER, LEARNER))
+        .andExpect(headerDoesNotExist("Authorization"))
+        .andRespond(withSuccess("{\"data\":[]}", MediaType.APPLICATION_JSON));
+    mvc.perform(get("/bff/api/v1/auth/me").session(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.accountId").value(LEARNER));
+    mvc.perform(get("/bff/api/v1/admin/accounts").session(session)).andExpect(status().isOk());
+    fixture.server.verify();
+    // A test account has no sign-in, profile or password of its own.
+    mvc.perform(get("/api/v1/account/sign-ins").session(session))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("code").value("TEST_SESSION"));
+    // Sign out: no provider involved, back to /sign-in, the gate admission carried into the fresh
+    // session.
+    var out =
+        mvc.perform(
+                post("/bff/api/v1/auth/logout")
+                    .session(session)
+                    .header("X-CSRF-TOKEN", csrf(session)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("data.logoutUrl").value("https://learn.example.test/sign-in"))
+            .andReturn();
+    var fresh = (MockHttpSession) out.getRequest().getSession(false);
+    assertThat(said())
+        .contains(
+            "Test session started while signed out: now using test account " + LEARNER,
+            "Signed out of test account "
+                + LEARNER
+                + " (kind test-session); the DEV gate stays open");
+    assertThat(fresh).isNotNull();
+    assertThat(fresh.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
+    assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
+    mvc.perform(get("/bff/api/v1/auth/me").session(fresh)).andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void aTestSessionWhoseGateIsGoneSendsNothingToTheDomain() throws Exception {
+    var session = started(gate());
+    session.removeAttribute(DevAccessSession.ATTRIBUTE);
+    mvc.perform(get("/bff/api/v1/auth/me").session(session)).andExpect(status().isUnauthorized());
+    fixture.server.verify();
+  }
+
+  @Test
+  void startIsRefusedWithoutTheGateForABadIdOrWhenTheDomainSaysNo() throws Exception {
+    var noGate = new MockHttpSession(context.getServletContext());
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session")
+                .session(noGate)
+                .header("X-CSRF-TOKEN", csrf(noGate))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accountId\":\"" + LEARNER + "\"}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("code").value("DEV_ADMISSION_REQUIRED"));
+    var session = gate();
+    String token = csrf(session);
+    for (String body : new String[] {"{\"accountId\":\"not-a-uuid\"}", "{}"})
+      mvc.perform(
+              post("/bff/api/v1/auth/test-session")
+                  .session(session)
+                  .header("X-CSRF-TOKEN", token)
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isUnprocessableEntity());
+    // Without the CSRF token nothing starts.
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session")
+                .session(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accountId\":\"" + LEARNER + "\"}"))
+        .andExpect(status().isForbidden());
+    domain(
+        "/internal/v1/test-sessions/start",
+        HttpMethod.POST,
+        "{\"code\":\"TEST_SESSION_FORBIDDEN\",\"message\":\"Your role cannot use this test"
+            + " account.\"}",
+        HttpStatus.FORBIDDEN);
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session")
+                .session(session)
+                .header("X-CSRF-TOKEN", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accountId\":\"" + LEARNER + "\"}"))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("code").value("TEST_SESSION_FORBIDDEN"));
+    assertThat(said())
+        .contains(
+            "Test session request refused: DEV_ADMISSION_REQUIRED (the DEV gate is not open in this"
+                + " session, HTTP 401)",
+            "Test session request refused: TEST_ACCOUNT_REQUIRED (no valid test account id was"
+                + " sent, HTTP 422)",
+            "Test session request refused: TEST_SESSION_FORBIDDEN (Domain refused the switch, HTTP"
+                + " 403)");
+    assertThat(session.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
+    fixture.server.verify();
+    fixture.server.reset();
+    domain(
+        "/internal/v1/test-sessions/start",
+        HttpMethod.POST,
+        "{}",
+        HttpStatus.INTERNAL_SERVER_ERROR);
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session")
+                .session(session)
+                .header("X-CSRF-TOKEN", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accountId\":\"" + LEARNER + "\"}"))
+        .andExpect(status().isServiceUnavailable());
+    fixture.server.verify();
+    fixture.server.reset();
+    fixture
+        .server
+        .expect(requestTo(oauth.domainApiUpstream() + "/internal/v1/test-sessions/start"))
+        .andRespond(withException(new IOException("down")));
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session")
+                .session(session)
+                .header("X-CSRF-TOKEN", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"accountId\":\"" + LEARNER + "\"}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("code").value("SERVICE_UNAVAILABLE"));
+    assertThat(said())
+        .contains(
+            "Test session request refused: HTTP_503 (the test-session service was unavailable, HTTP"
+                + " 503)",
+            "Test session request could not reach Domain: DOMAIN_UNAVAILABLE"
+                + " (ResourceAccessException < IOException); answered 503");
+  }
+
+  static final String SECOND = "7d1c0b9a-2e3f-4a5b-9c8d-1e2f3a4b5c6d";
+
+  /**
+   * Switches this session to {@code account}, signed in as yourself ({@code staff}) or already in a
+   * test session.
+   */
+  void switchTo(MockHttpSession session, String account, boolean staff) throws Exception {
+    domain(
+        "/internal/v1/test-sessions/start",
+        HttpMethod.POST,
+        "{\"data\":{\"accountId\":\"" + account + "\"}}",
+        HttpStatus.OK);
+    var request =
+        post("/bff/api/v1/auth/test-session")
+            .session(session)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"accountId\":\"" + account + "\"}");
+    if (staff)
+      request
+          .with(oauth2Login().clientRegistration(registrations.findByRegistrationId("lookahead")))
+          .with(SecurityMockMvcRequestPostProcessors.csrf());
+    else request.header("X-CSRF-TOKEN", csrf(session));
+    mvc.perform(request).andExpect(status().isOk()).andExpect(jsonPath("data.next").value("/"));
+    fixture.server.verify();
+    fixture.server.reset();
+  }
+
+  /**
+   * The staff sign-in's tokens in the session, as the real sign-in stores them (the test login
+   * keeps them for one request).
+   */
+  void keepTokens(MockHttpSession session) {
+    var staff = (OAuth2AuthenticationToken) session.getAttribute(TestSessionState.STAFF_SIGN_IN);
+    var request = new MockHttpServletRequest();
+    request.setSession(session);
+    var token =
+        new OAuth2AccessToken(
+            OAuth2AccessToken.TokenType.BEARER,
+            "synthetic-access-token",
+            Instant.now(),
+            Instant.now().plusSeconds(600));
+    authorizedClients.saveAuthorizedClient(
+        new OAuth2AuthorizedClient(
+            registrations.findByRegistrationId("lookahead"), staff.getName(), token),
+        staff,
+        request,
+        new MockHttpServletResponse());
+  }
+
+  Authentication signedIn(MockHttpSession session) {
+    return ((SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+  }
+
+  /**
+   * DLV-969 (owner, 2026-11-04): Switch to a test account from the account menu, switch again, then
+   * Back to my account.
+   */
+  @Test
+  void staffSwitchFromTheirOwnSignInAndComeBackWithoutSigningIn() throws Exception {
+    var session = gate();
+    signedInCheck();
+    String before = session.getId();
+    switchTo(session, LEARNER, true);
+    keepTokens(session);
+    assertThat(session.getId()).isNotEqualTo(before);
+    assertThat(TestSessionState.active(signedIn(session))).isTrue();
+    var staff = session.getAttribute(TestSessionState.STAFF_SIGN_IN);
+    assertThat(staff).isInstanceOf(OAuth2AuthenticationToken.class);
+    assertThat(session.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
+    mvc.perform(get("/bff/api/v1/auth/test-session").session(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.active").value(true))
+        .andExpect(jsonPath("data.canReturn").value(true))
+        .andExpect(header().string("Cache-Control", "no-store"));
+    // Switching between test accounts keeps the same staff sign-in aside.
+    switchTo(session, SECOND, false);
+    assertThat(signedIn(session).getPrincipal()).isEqualTo(SECOND);
+    assertThat(session.getAttribute(TestSessionState.STAFF_SIGN_IN)).isSameAs(staff);
+    // Back to my account: your own sign-in again, with a new session id, and nothing kept aside.
+    String during = session.getId();
+    signedInCheck();
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session/end")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.next").value("/"));
+    assertThat(session.getId()).isNotEqualTo(during);
+    assertThat(signedIn(session)).isSameAs(staff);
+    assertThat(session.getAttribute(TestSessionState.STAFF_SIGN_IN)).isNull();
+    assertThat(session.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
+    mvc.perform(get("/bff/api/v1/auth/test-session").session(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.active").value(false))
+        .andExpect(jsonPath("data.canReturn").value(false));
+    // Not in a test session: nothing to end.
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session/end")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("code").value("NO_TEST_SESSION"));
+    // DLV-969 (owner, 2026-11-04): the switch, the switch between test accounts, Back to my account
+    // and the refusal, each logged.
+    assertThat(said())
+        .contains(
+            "Test session started from the staff sign-in: now using test account "
+                + LEARNER
+                + " (the staff sign-in is kept for Back to my account)",
+            "Test session switched from test account " + LEARNER + " to test account " + SECOND,
+            "Back to my account: left test account " + SECOND + " and restored the staff sign-in",
             "Test session request refused: NO_TEST_SESSION (no test account is in use, HTTP 409)");
-        assertThat(events.list.stream().filter(line->line.getFormattedMessage().startsWith("Test session switched from test account")).findFirst().map(OpsLogTest::pairs).orElseThrow())
-            .contains("event.action=test-session.switched","event.outcome=success","testAccount.id="+SECOND,"testAccount.previousId="+LEARNER,"from=test-account");
-        // Without the CSRF token, Back to my account does nothing.
-        fixture.server.reset();
-        var another=started(gate());
-        mvc.perform(post("/bff/api/v1/auth/test-session/end").session(another)).andExpect(status().isForbidden());
-        assertThat(TestSessionState.active(signedIn(another))).isTrue();
-    }
+    assertThat(
+            events.list.stream()
+                .filter(line ->
+                    line.getFormattedMessage()
+                        .startsWith("Test session switched from test account"))
+                .findFirst()
+                .map(OpsLogTest::pairs)
+                .orElseThrow())
+        .contains(
+            "event.action=test-session.switched",
+            "event.outcome=success",
+            "testAccount.id=" + SECOND,
+            "testAccount.previousId=" + LEARNER,
+            "from=test-account");
+    // Without the CSRF token, Back to my account does nothing.
+    fixture.server.reset();
+    var another = started(gate());
+    mvc.perform(post("/bff/api/v1/auth/test-session/end").session(another))
+        .andExpect(status().isForbidden());
+    assertThat(TestSessionState.active(signedIn(another))).isTrue();
+  }
 
-    /** A test session begun signed out has no staff sign-in to return to: Back to my account ends it, as Sign out does. */
-    @Test void backFromATestSessionStartedSignedOutGoesToTheSignInPage()throws Exception {
-        var session=started(gate());
-        mvc.perform(get("/bff/api/v1/auth/test-session").session(session)).andExpect(jsonPath("data.active").value(true)).andExpect(jsonPath("data.canReturn").value(false));
-        var out=mvc.perform(post("/bff/api/v1/auth/test-session/end").session(session).header("X-CSRF-TOKEN",csrf(session)))
-            .andExpect(status().isOk()).andExpect(jsonPath("data.next").value("/sign-in")).andReturn();
-        var fresh=(MockHttpSession)out.getRequest().getSession(false);
-        assertThat(said()).contains("Test session ended: test account "+LEARNER+" signed out, no staff sign-in to return to; the DEV gate stays open");
-        assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();assertThat(fresh.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
-        // The gate gone: the session no longer counts as a test session.
-        var gone=started(gate());gone.removeAttribute(DevAccessSession.ATTRIBUTE);
-        mvc.perform(get("/bff/api/v1/auth/test-session").session(gone)).andExpect(status().isOk()).andExpect(jsonPath("data.active").value(false));
-    }
+  /**
+   * A test session begun signed out has no staff sign-in to return to: Back to my account ends it,
+   * as Sign out does.
+   */
+  @Test
+  void backFromATestSessionStartedSignedOutGoesToTheSignInPage() throws Exception {
+    var session = started(gate());
+    mvc.perform(get("/bff/api/v1/auth/test-session").session(session))
+        .andExpect(jsonPath("data.active").value(true))
+        .andExpect(jsonPath("data.canReturn").value(false));
+    var out =
+        mvc.perform(
+                post("/bff/api/v1/auth/test-session/end")
+                    .session(session)
+                    .header("X-CSRF-TOKEN", csrf(session)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("data.next").value("/sign-in"))
+            .andReturn();
+    var fresh = (MockHttpSession) out.getRequest().getSession(false);
+    assertThat(said())
+        .contains(
+            "Test session ended: test account "
+                + LEARNER
+                + " signed out, no staff sign-in to return to; the DEV gate stays open");
+    assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
+    assertThat(fresh.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
+    // The gate gone: the session no longer counts as a test session.
+    var gone = started(gate());
+    gone.removeAttribute(DevAccessSession.ATTRIBUTE);
+    mvc.perform(get("/bff/api/v1/auth/test-session").session(gone))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.active").value(false));
+  }
 
-    /**
-     * DLV-971: the delivery plan and promoting a review onto it are staff work. A test account is a learner: a test session is
-     * refused as Previews/Architecture refuse it (HTTP 401, empty body) and the Domain is never asked; Back to my account
-     * restores the staff sign-in, whose calls are forwarded with its bearer token.
-     */
-    @Test void aTestSessionNeverReachesTheDeliveryPlanWhileTheStaffSignInIsForwarded()throws Exception {
-        String review="/bff/api/v1/platform-reviews/6c8bc359-1141-4c98-83e6-a5ca967fe180";
-        // Signed out: as today, the route needs a sign-in.
-        mvc.perform(get("/bff/api/v1/delivery/plan").session(gate())).andExpect(status().isUnauthorized());
-        var session=gate();signedInCheck();
-        switchTo(session,LEARNER,true);
-        keepTokens(session);
-        String token=csrf(session);
-        mvc.perform(get("/bff/api/v1/delivery/plan").session(session)).andExpect(status().isUnauthorized()).andExpect(content().string(""));
-        mvc.perform(post("/bff/api/v1/delivery/plan/work-items").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
-            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
-        mvc.perform(put("/bff/api/v1/delivery/plan/work-items/DLV-971").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
-            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
-        mvc.perform(post("/bff/api/v1/delivery/plan/work-items/DLV-971/resolve-conflict").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
-            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
-        mvc.perform(post(review+"/promote").session(session).header("X-CSRF-TOKEN",token).contentType(MediaType.APPLICATION_JSON).content("{}"))
-            .andExpect(status().isUnauthorized()).andExpect(content().string(""));
-        // The other platform-review routes still reach the Domain as the test account (its own reviews, read by the learner).
-        domain("/api/v1/platform-reviews/me",HttpMethod.GET,"{\"data\":[]}",HttpStatus.OK);
-        mvc.perform(get("/bff/api/v1/platform-reviews/me").session(session)).andExpect(status().isOk());
-        fixture.server.verify();fixture.server.reset();
-        // Back to my account: the staff sign-in's bearer token travels, the test-account headers do not. (The Domain fixture is
-        // ordered: the write comes first because the sign-in check it triggers is the first expectation, and a read may reuse it.)
-        signedInCheck();
-        mvc.perform(post("/bff/api/v1/auth/test-session/end").session(session).header("X-CSRF-TOKEN",csrf(session))).andExpect(status().isOk());
-        fixture.server.expect(requestTo(oauth.domainApiUpstream()+"/api/v1/delivery/plan/work-items/DLV-971")).andExpect(method(HttpMethod.PUT))
-            .andExpect(MockRestRequestMatchers.header("Authorization","Bearer synthetic-access-token")).andExpect(MockRestRequestMatchers.header("If-Match","\"3\""))
-            .andExpect(headerDoesNotExist(TestSessionState.ACCOUNT_HEADER)).andExpect(headerDoesNotExist(TestSessionState.SECRET_HEADER))
-            .andExpect(MockRestRequestMatchers.content().string("{\"title\":\"Delivery routes\"}"))
-            .andRespond(withSuccess("{\"data\":{\"id\":\"DLV-971\"}}",MediaType.APPLICATION_JSON));
-        fixture.server.expect(requestTo(oauth.domainApiUpstream()+"/api/v1/delivery/plan")).andExpect(method(HttpMethod.GET))
-            .andExpect(MockRestRequestMatchers.header("Authorization","Bearer synthetic-access-token")).andExpect(headerDoesNotExist(TestSessionState.ACCOUNT_HEADER))
-            .andRespond(withSuccess("{\"data\":{\"workItems\":[]}}",MediaType.APPLICATION_JSON));
-        fixture.server.expect(requestTo(oauth.domainApiUpstream()+"/api/v1/platform-reviews/6c8bc359-1141-4c98-83e6-a5ca967fe180/promote")).andExpect(method(HttpMethod.POST))
-            .andExpect(MockRestRequestMatchers.header("Authorization","Bearer synthetic-access-token"))
-            .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body("{\"data\":{\"id\":\"DLV-972\"}}"));
-        mvc.perform(put("/bff/api/v1/delivery/plan/work-items/DLV-971").session(session).header("X-CSRF-TOKEN",csrf(session)).header("If-Match","\"3\"")
-                .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"Delivery routes\"}"))
-            .andExpect(status().isOk()).andExpect(jsonPath("data.id").value("DLV-971"));
-        mvc.perform(get("/bff/api/v1/delivery/plan").session(session)).andExpect(status().isOk()).andExpect(jsonPath("data.workItems").isEmpty())
-            .andExpect(header().string("Cache-Control","no-store"));
-        mvc.perform(post(review+"/promote").session(session).header("X-CSRF-TOKEN",csrf(session)).contentType(MediaType.APPLICATION_JSON).content("{}"))
-            .andExpect(status().isCreated()).andExpect(jsonPath("data.id").value("DLV-972"));
-        // Not routes: the plan is never deleted or replaced whole, and a malformed id stops here.
-        mvc.perform(delete("/bff/api/v1/delivery/plan").session(session).header("X-CSRF-TOKEN",csrf(session))).andExpect(status().isNotFound());
-        mvc.perform(put("/bff/api/v1/delivery/plan").session(session).header("X-CSRF-TOKEN",csrf(session)).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isMethodNotAllowed());
-        mvc.perform(put("/bff/api/v1/delivery/plan/work-items/.DLV-971").session(session).header("X-CSRF-TOKEN",csrf(session)).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isMethodNotAllowed());
-        fixture.server.verify();
-    }
+  /**
+   * DLV-971: the delivery plan and promoting a review onto it are staff work. A test account is a
+   * learner: a test session is refused as Previews/Architecture refuse it (HTTP 401, empty body)
+   * and the Domain is never asked; Back to my account restores the staff sign-in, whose calls are
+   * forwarded with its bearer token.
+   */
+  @Test
+  void aTestSessionNeverReachesTheDeliveryPlanWhileTheStaffSignInIsForwarded() throws Exception {
+    String review = "/bff/api/v1/platform-reviews/6c8bc359-1141-4c98-83e6-a5ca967fe180";
+    // Signed out: as today, the route needs a sign-in.
+    mvc.perform(get("/bff/api/v1/delivery/plan").session(gate()))
+        .andExpect(status().isUnauthorized());
+    var session = gate();
+    signedInCheck();
+    switchTo(session, LEARNER, true);
+    keepTokens(session);
+    String token = csrf(session);
+    mvc.perform(get("/bff/api/v1/delivery/plan").session(session))
+        .andExpect(status().isUnauthorized())
+        .andExpect(content().string(""));
+    mvc.perform(
+            post("/bff/api/v1/delivery/plan/work-items")
+                .session(session)
+                .header("X-CSRF-TOKEN", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(content().string(""));
+    mvc.perform(
+            put("/bff/api/v1/delivery/plan/work-items/DLV-971")
+                .session(session)
+                .header("X-CSRF-TOKEN", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(content().string(""));
+    mvc.perform(
+            post("/bff/api/v1/delivery/plan/work-items/DLV-971/resolve-conflict")
+                .session(session)
+                .header("X-CSRF-TOKEN", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(content().string(""));
+    mvc.perform(
+            post(review + "/promote")
+                .session(session)
+                .header("X-CSRF-TOKEN", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(content().string(""));
+    // The other platform-review routes still reach the Domain as the test account (its own reviews,
+    // read by the learner).
+    domain("/api/v1/platform-reviews/me", HttpMethod.GET, "{\"data\":[]}", HttpStatus.OK);
+    mvc.perform(get("/bff/api/v1/platform-reviews/me").session(session)).andExpect(status().isOk());
+    fixture.server.verify();
+    fixture.server.reset();
+    // Back to my account: the staff sign-in's bearer token travels, the test-account headers do
+    // not. (The Domain fixture is ordered: the write comes first because the sign-in check it
+    // triggers is the first expectation, and a read may reuse it.)
+    signedInCheck();
+    mvc.perform(
+            post("/bff/api/v1/auth/test-session/end")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session)))
+        .andExpect(status().isOk());
+    fixture
+        .server
+        .expect(requestTo(oauth.domainApiUpstream() + "/api/v1/delivery/plan/work-items/DLV-971"))
+        .andExpect(method(HttpMethod.PUT))
+        .andExpect(MockRestRequestMatchers.header("Authorization", "Bearer synthetic-access-token"))
+        .andExpect(MockRestRequestMatchers.header("If-Match", "\"3\""))
+        .andExpect(headerDoesNotExist(TestSessionState.ACCOUNT_HEADER))
+        .andExpect(headerDoesNotExist(TestSessionState.SECRET_HEADER))
+        .andExpect(MockRestRequestMatchers.content().string("{\"title\":\"Delivery routes\"}"))
+        .andRespond(withSuccess("{\"data\":{\"id\":\"DLV-971\"}}", MediaType.APPLICATION_JSON));
+    fixture
+        .server
+        .expect(requestTo(oauth.domainApiUpstream() + "/api/v1/delivery/plan"))
+        .andExpect(method(HttpMethod.GET))
+        .andExpect(MockRestRequestMatchers.header("Authorization", "Bearer synthetic-access-token"))
+        .andExpect(headerDoesNotExist(TestSessionState.ACCOUNT_HEADER))
+        .andRespond(withSuccess("{\"data\":{\"workItems\":[]}}", MediaType.APPLICATION_JSON));
+    fixture
+        .server
+        .expect(
+            requestTo(
+                oauth.domainApiUpstream()
+                    + "/api/v1/platform-reviews/6c8bc359-1141-4c98-83e6-a5ca967fe180/promote"))
+        .andExpect(method(HttpMethod.POST))
+        .andExpect(MockRestRequestMatchers.header("Authorization", "Bearer synthetic-access-token"))
+        .andRespond(
+            withStatus(HttpStatus.CREATED)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"data\":{\"id\":\"DLV-972\"}}"));
+    mvc.perform(
+            put("/bff/api/v1/delivery/plan/work-items/DLV-971")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session))
+                .header("If-Match", "\"3\"")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"Delivery routes\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.id").value("DLV-971"));
+    mvc.perform(get("/bff/api/v1/delivery/plan").session(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("data.workItems").isEmpty())
+        .andExpect(header().string("Cache-Control", "no-store"));
+    mvc.perform(
+            post(review + "/promote")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("data.id").value("DLV-972"));
+    // Not routes: the plan is never deleted or replaced whole, and a malformed id stops here.
+    mvc.perform(
+            delete("/bff/api/v1/delivery/plan")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session)))
+        .andExpect(status().isNotFound());
+    mvc.perform(
+            put("/bff/api/v1/delivery/plan")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isMethodNotAllowed());
+    mvc.perform(
+            put("/bff/api/v1/delivery/plan/work-items/.DLV-971")
+                .session(session)
+                .header("X-CSRF-TOKEN", csrf(session))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isMethodNotAllowed());
+    fixture.server.verify();
+  }
 
-    /** Sign out while a test account is in use, after switching from your own sign-in, signs you out of your own sign-in too. */
-    @Test void signOutFromASwitchedTestSessionEndsTheStaffSignIn()throws Exception {
-        var session=gate();signedInCheck();
-        switchTo(session,LEARNER,true);
-        keepTokens(session);
-        // The staff sign-in's own sign-out: the Domain ends that sign-in, with its token, not the test account's headers.
-        fixture.server.expect(requestTo(oauth.domainApiUpstream()+"/internal/v1/cloud-sign-ins/logout")).andExpect(method(HttpMethod.POST))
-            .andExpect(MockRestRequestMatchers.header("Authorization","Bearer synthetic-access-token"))
-            .andRespond(withSuccess("{\"data\":{}}",MediaType.APPLICATION_JSON));
-        var out=mvc.perform(post("/bff/api/v1/auth/logout").session(session).header("X-CSRF-TOKEN",csrf(session)))
-            .andExpect(status().isOk()).andExpect(jsonPath("data.logoutUrl").value("https://learn.example.test/bff/logout/complete")).andReturn();
-        var fresh=(MockHttpSession)out.getRequest().getSession(false);
-        assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
-        assertThat(fresh.getAttribute(TestSessionState.STAFF_SIGN_IN)).isNull();
-        assertThat(fresh.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
-        fixture.server.verify();
-        assertThat(said()).contains("Signed out of test account "+LEARNER+" and of the staff sign-in kept behind it (kind test-session-and-staff)");
-    }
+  /**
+   * Sign out while a test account is in use, after switching from your own sign-in, signs you out
+   * of your own sign-in too.
+   */
+  @Test
+  void signOutFromASwitchedTestSessionEndsTheStaffSignIn() throws Exception {
+    var session = gate();
+    signedInCheck();
+    switchTo(session, LEARNER, true);
+    keepTokens(session);
+    // The staff sign-in's own sign-out: the Domain ends that sign-in, with its token, not the test
+    // account's headers.
+    fixture
+        .server
+        .expect(requestTo(oauth.domainApiUpstream() + "/internal/v1/cloud-sign-ins/logout"))
+        .andExpect(method(HttpMethod.POST))
+        .andExpect(MockRestRequestMatchers.header("Authorization", "Bearer synthetic-access-token"))
+        .andRespond(withSuccess("{\"data\":{}}", MediaType.APPLICATION_JSON));
+    var out =
+        mvc.perform(
+                post("/bff/api/v1/auth/logout")
+                    .session(session)
+                    .header("X-CSRF-TOKEN", csrf(session)))
+            .andExpect(status().isOk())
+            .andExpect(
+                jsonPath("data.logoutUrl").value("https://learn.example.test/bff/logout/complete"))
+            .andReturn();
+    var fresh = (MockHttpSession) out.getRequest().getSession(false);
+    assertThat(fresh.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
+    assertThat(fresh.getAttribute(TestSessionState.STAFF_SIGN_IN)).isNull();
+    assertThat(fresh.getAttribute(DevAccessSession.ATTRIBUTE)).isNotNull();
+    fixture.server.verify();
+    assertThat(said())
+        .contains(
+            "Signed out of test account "
+                + LEARNER
+                + " and of the staff sign-in kept behind it (kind test-session-and-staff)");
+  }
 }
