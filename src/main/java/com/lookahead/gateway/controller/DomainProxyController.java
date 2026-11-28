@@ -11,12 +11,18 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @Profile("gateway")
 public class DomainProxyController {
-    private final DomainProxy forwarder;
-    public DomainProxyController(DomainProxy forwarder) {
-        this.forwarder=forwarder;
-    }
-    @RequestMapping(value={"/bff/api/v1/**","/content/**"},method={RequestMethod.GET,RequestMethod.POST,RequestMethod.PUT,RequestMethod.DELETE})
-    public ResponseEntity<byte[]> proxy(HttpServletRequest request,HttpServletResponse response,Authentication authentication) throws IOException {
-        return forwarder.relay(request,response,authentication);
-    }
+  private final DomainProxy forwarder;
+
+  public DomainProxyController(DomainProxy forwarder) {
+    this.forwarder = forwarder;
+  }
+
+  @RequestMapping(
+      value = {"/bff/api/v1/**", "/content/**"},
+      method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE})
+  public ResponseEntity<byte[]> proxy(
+      HttpServletRequest request, HttpServletResponse response, Authentication authentication)
+      throws IOException {
+    return forwarder.relay(request, response, authentication);
+  }
 }

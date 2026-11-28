@@ -47,6 +47,20 @@ SHA-256 checksum. CI additionally checks `gradle-wrapper.jar` against the
 [official Gradle 9.6.1 checksum](https://downloads.gradle.org/distributions/gradle-9.6.1-wrapper.jar.sha256).
 When upgrading Gradle, regenerate the Wrapper and update both reviewed checksums.
 
+### Code style (DLV-1026)
+
+Java follows Google Java Style as google-java-format 2.0.0 lays it out (2-space indent,
+100 columns, its import order), applied by the Spotless Gradle plugin 8.11.0 (`build.gradle`).
+`spotlessCheck` is part of `check`, so `./gradlew check` and CI fail on a mis-formatted file;
+`./gradlew spotlessApply` formats. google-java-format leaves a line it cannot break (a long
+name, a string without spaces), so `style/SourceLineLengthTest` fails on any Java line over 100
+columns apart from package, import and URL lines, the exceptions of the guide.
+
+The pipeline Python under `.github/pipeline/` follows PEP 8, formatted (Black-compatible, 88
+columns) and linted (rules E, W, F, I) by Ruff 0.17.5 with `ruff.toml` at the repository root.
+CI installs the hash-locked Ruff from `.github/pipeline/shared/requirements-style.txt` and runs
+`ruff format --check .` and `ruff check .` from the root; locally `ruff format .` formats.
+
 ## Contracts with other repositories
 
 No repository clones another at build or deploy time, and no repository keeps a copy of a

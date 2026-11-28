@@ -25,32 +25,76 @@ import org.springframework.security.oauth2.jwt.JwtDecoderFactory;
 
 /** DLV-969: the beans of the password pages, built by calling the bean methods directly. */
 class PasswordSignInConfigurationTest {
-    final OAuthClientDetails oauth = OAuthClientDetailsFactory.from(new OAuthClientDetailsFactoryTest().production());
-    final ClientRegistrationRepository registrations = new OAuthClientConfiguration().oauthClientRegistrations(oauth);
-    final HttpSessionOAuth2AuthorizedClientRepository clients = new HttpSessionOAuth2AuthorizedClientRepository();
-    final SignInCompletionHandler completion = mock(SignInCompletionHandler.class);
-    final MutableClock clock = new MutableClock(Instant.parse("2026-11-02T20:00:00Z"));
-    String tokenUse = "id";
-    final JwtDecoderFactory<ClientRegistration> idDecoders = registration -> token -> Jwt.withTokenValue(token).header("alg", "RS256")
-        .issuer(oauth.issuer()).subject("synthetic-subject").audience(List.of(oauth.clientId()))
-        .issuedAt(clock.instant()).expiresAt(clock.instant().plusSeconds(300)).claim("auth_time", clock.instant())
-        .claim("token_use", tokenUse).claim("cognito:username", "priya@example.invalid").build();
-    @AfterEach void clear() { SecurityContextHolder.clearContext(); }
-    @Test void productionConstructorBuildsAnAnonymousRegionalClient() {
-        var configuration = new PasswordSignInConfiguration();
-        var built = configuration.passwordSignInCognitoIdp(oauth);
-        assertThat(built.serviceClientConfiguration().region().id()).isEqualTo(URI.create(oauth.issuer()).getHost().split("\\.")[1]);
-        built.close();
-        assertThat(new PasswordSignInController(configuration.passwordSignInHandler(configuration.passwordSignInCognitoClient(oauth), configuration.passwordSignInThrottle(),
-            configuration.passwordSignInSession(registrations, idDecoders, clients, completion)))).isNotNull();
+  final OAuthClientDetails oauth =
+      OAuthClientDetailsFactory.from(new OAuthClientDetailsFactoryTest().production());
+  final ClientRegistrationRepository registrations =
+      new OAuthClientConfiguration().oauthClientRegistrations(oauth);
+  final HttpSessionOAuth2AuthorizedClientRepository clients =
+      new HttpSessionOAuth2AuthorizedClientRepository();
+  final SignInCompletionHandler completion = mock(SignInCompletionHandler.class);
+  final MutableClock clock = new MutableClock(Instant.parse("2026-11-02T20:00:00Z"));
+  String tokenUse = "id";
+  final JwtDecoderFactory<ClientRegistration> idDecoders =
+      registration ->
+          token ->
+              Jwt.withTokenValue(token)
+                  .header("alg", "RS256")
+                  .issuer(oauth.issuer())
+                  .subject("synthetic-subject")
+                  .audience(List.of(oauth.clientId()))
+                  .issuedAt(clock.instant())
+                  .expiresAt(clock.instant().plusSeconds(300))
+                  .claim("auth_time", clock.instant())
+                  .claim("token_use", tokenUse)
+                  .claim("cognito:username", "priya@example.invalid")
+                  .build();
+
+  @AfterEach
+  void clear() {
+    SecurityContextHolder.clearContext();
+  }
+
+  @Test
+  void productionConstructorBuildsAnAnonymousRegionalClient() {
+    var configuration = new PasswordSignInConfiguration();
+    var built = configuration.passwordSignInCognitoIdp(oauth);
+    assertThat(built.serviceClientConfiguration().region().id())
+        .isEqualTo(URI.create(oauth.issuer()).getHost().split("\\.")[1]);
+    built.close();
+    assertThat(
+            new PasswordSignInController(
+                configuration.passwordSignInHandler(
+                    configuration.passwordSignInCognitoClient(oauth),
+                    configuration.passwordSignInThrottle(),
+                    configuration.passwordSignInSession(
+                        registrations, idDecoders, clients, completion))))
+        .isNotNull();
+  }
+
+  static final class MutableClock extends Clock {
+    private Instant now;
+
+    MutableClock(Instant now) {
+      this.now = now;
     }
 
-    static final class MutableClock extends Clock {
-        private Instant now;
-        MutableClock(Instant now) { this.now = now; }
-        void advance(long seconds) { now = now.plusSeconds(seconds); }
-        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
-        @Override public Clock withZone(ZoneId zone) { return this; }
-        @Override public Instant instant() { return now; }
+    void advance(long seconds) {
+      now = now.plusSeconds(seconds);
     }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return now;
+    }
+  }
 }

@@ -15,14 +15,17 @@ import org.springframework.web.bind.annotation.RestController;
 @Profile("gateway")
 @ConditionalOnProperty(name = "app.author-previews.enabled", havingValue = "true")
 public class AuthorPreviewController {
-    private final AuthorPreviewProxy previews;
+  private final AuthorPreviewProxy previews;
 
-    AuthorPreviewController(AuthorPreviewProxy previews) {
-        this.previews = previews;
-    }
+  AuthorPreviewController(AuthorPreviewProxy previews) {
+    this.previews = previews;
+  }
 
-    @RequestMapping(value = "/bff/author/previews/**", method = {RequestMethod.GET, RequestMethod.HEAD})
-    ResponseEntity<byte[]> preview(HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
-        return previews.preview(request, response, authentication);
-    }
+  @RequestMapping(
+      value = "/bff/author/previews/**",
+      method = {RequestMethod.GET, RequestMethod.HEAD})
+  ResponseEntity<byte[]> preview(
+      HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
+    return previews.preview(request, response, authentication);
+  }
 }

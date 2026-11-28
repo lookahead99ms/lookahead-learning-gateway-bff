@@ -13,13 +13,22 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 @Configuration
 @Profile("lower-cost-dev")
 public class DevSessionConfiguration {
-    @Bean DevSessionStore devSessionStore(Environment env){
-        var table=env.getRequiredProperty("app.dev-session.table");
-        return new DevSessionStore(devSessionDynamoDb(env),table);
-    }
-    /** The SDK client. Spring closes it when the application stops: it is the only bean here with something to close. */
-    @Bean DynamoDbClient devSessionDynamoDb(Environment env){
-        return DevSessionStore.configured(DynamoDbClient.builder().region(Region.of(env.getRequiredProperty("app.dev-session.region")))
-            .credentialsProvider(ContainerCredentialsProvider.builder().build())).build();
-    }
+  @Bean
+  DevSessionStore devSessionStore(Environment env) {
+    var table = env.getRequiredProperty("app.dev-session.table");
+    return new DevSessionStore(devSessionDynamoDb(env), table);
+  }
+
+  /**
+   * The SDK client. Spring closes it when the application stops: it is the only bean here with
+   * something to close.
+   */
+  @Bean
+  DynamoDbClient devSessionDynamoDb(Environment env) {
+    return DevSessionStore.configured(
+            DynamoDbClient.builder()
+                .region(Region.of(env.getRequiredProperty("app.dev-session.region")))
+                .credentialsProvider(ContainerCredentialsProvider.builder().build()))
+        .build();
+  }
 }
